@@ -361,11 +361,12 @@ class WebPlayer(
         val path = call.request.path().removePrefix("/").ifBlank { "index.html" }
         if (".." in path) return call.respondText("No", status = HttpStatusCode.BadRequest)
         val direct = WebPlayer::class.java.getResourceAsStream("/web/$path")
-        // A route inside the page, such as /library, is the page itself.
-        val isRoute = direct == null && '.' !in path.substringAfterLast('/')
+        // Anything that is not one of the page's files is a place inside it -- /library, /playlist/<key>,
+        // whatever a key contains -- and is the page itself. Only a missing asset is really missing.
+        val isRoute = direct == null && !path.startsWith("assets/") && !path.startsWith("api/")
         val resource = direct ?: if (isRoute) WebPlayer::class.java.getResourceAsStream("/web/index.html") else null
         if (resource == null) {
-            if (path == "index.html" || '.' !in path) return call.respondText(MISSING_PAGE, ContentType.Text.Html)
+            if (isRoute || path == "index.html") return call.respondText(MISSING_PAGE, ContentType.Text.Html)
             return call.respondText("Not found", status = HttpStatusCode.NotFound)
         }
         val bytes = resource.use { it.readBytes() }
