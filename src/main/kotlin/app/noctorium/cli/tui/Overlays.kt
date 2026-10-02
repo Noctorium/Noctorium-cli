@@ -50,7 +50,7 @@ sealed interface Overlay {
                 "a  A" to "Add to the queue, or play it next",
                 "l" to "Like or unlike, on the real account (L: the one playing)",
                 "P" to "Add to a playlist",
-                "d" to "Download to keep",
+                "d  e" to "Download to keep, or save as an MP3 in your music folder",
                 "c  o" to "Copy its link, open it in the browser",
                 "x  J K" to "Remove from the queue or playlist, move it down or up",
             ),

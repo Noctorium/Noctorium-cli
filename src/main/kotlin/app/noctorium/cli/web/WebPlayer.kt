@@ -40,6 +40,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonElement
@@ -181,6 +183,14 @@ class WebPlayer(
         state.connect.marks("connect")
         state.signInTransfer.marks("signIn")
         state.account.marks("account")
+        // While something plays in a browser, the next track's stream is found ahead of time.
+        scope.launch {
+            state.playback.map { it.status to it.track?.queueKey }.distinctUntilChanged().collect { (status, _) ->
+                if (status != app.noctorium.playback.PlaybackStatus.PLAYING || player.output.value != Output.BROWSER) return@collect
+                val queue = state.queue.state.value
+                queue.tracks.getOrNull(queue.currentIndex + 1)?.let(player.browser::prefetch)
+            }
+        }
         // Messages core wants shown, passed to every page as a passing notice.
         scope.launch { state.likes.collect { it.message?.let { m -> notice(m) } } }
         scope.launch { state.library.collect { it.notice?.let { m -> notice(m) } } }

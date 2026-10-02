@@ -463,6 +463,7 @@ object Tracks {
             "A" -> { state.playNext(track); tui.toast("Playing next: ${track.title}") }
             "l" -> tui.like(track)
             "d" -> { state.downloadTrack(track); tui.toast("Downloading ${track.title}…") }
+            "e" -> if (state.canSaveAsMp3()) { state.exportTrack(track); tui.toast("Saving ${track.title} as an MP3…") } else tui.toast("Saving as MP3 needs mpv", Row.Tone.WARN)
             "c" -> state.copyTrackLink(track)
             "o" -> state.openExternalUrl(track.sourceUrl)
             "i" -> { val pinned = state.isPinned(track); state.togglePin(track); tui.toast(if (pinned) "Unpinned from Home" else "Pinned to Home") }

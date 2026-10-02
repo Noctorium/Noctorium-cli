@@ -6,6 +6,7 @@ import app.noctorium.playback.PlaybackEngine
 import app.noctorium.playback.PlaybackState
 import app.noctorium.playback.PlaybackStatus
 import app.noctorium.playback.YtDlpService
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -57,6 +58,30 @@ class BrowserEngine(
     @Volatile
     private var looping = false
 
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+
+    /**
+     * Streams already found, for a while. yt-dlp takes seconds over a SoundCloud track and longer over a
+     * long one, so the next track in the queue is looked up while this one plays ([prefetch]) and starts
+     * without the wait. Twenty minutes is well inside how long either service's addresses last.
+     */
+    private val found = ConcurrentHashMap<String, Pair<BrowserStream, Long>>()
+
+    private suspend fun stream(track: Track): BrowserStream {
+        val now = System.currentTimeMillis()
+        found[track.sourceUrl]?.takeIf { now - it.second < 20 * 60_000 }?.let { return it.first }
+        if (found.size > 32) found.clear()
+        return backend.resolveBrowserAudio(track.sourceUrl).also { found[track.sourceUrl] = it to now }
+    }
+
+    /** Finds [track]'s stream in the background, so playing it next starts at once. */
+    fun prefetch(track: Track) {
+        if (downloadedFile(track) != null) return
+        val known = found[track.sourceUrl]
+        if (known != null && System.currentTimeMillis() - known.second < 15 * 60_000) return
+        scope.launch { runCatching { stream(track) } }
+    }
+
     override suspend fun play(track: Track) {
         val load = ++generation
         mutableState.update {
@@ -64,7 +89,7 @@ class BrowserEngine(
         }
         val stream = runCatching {
             downloadedFile(track)?.let { Stream.Local(track, it) }
-                ?: Stream.Remote(track, backend.resolveBrowserAudio(track.sourceUrl))
+                ?: Stream.Remote(track, stream(track))
         }.getOrElse { failure ->
             if (load == generation) {
                 mutableState.update { it.copy(status = PlaybackStatus.ERROR, errorMessage = failure.message ?: "Could not find the audio") }
@@ -138,6 +163,7 @@ class BrowserEngine(
     }
 
     override fun close() {
+        scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
         streams.clear()
         sink = null
     }
