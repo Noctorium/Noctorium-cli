@@ -1,0 +1,58 @@
+name: CI
+
+# Every push and pull request: the CLI compiles and its tests pass on both systems, against the core its
+# base/ submodule pins and the page its web/ submodule pins, and the release archive can be made. Releases
+# themselves are cut by Noctorium-Installer, which builds this the same way.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Test, and make the archive
+        shell: bash
+        run: ./gradlew test cliArchive --stacktrace
+
+      - name: It runs
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            build/package/noctorium-cli/noctorium.exe version
+          else
+            build/package/noctorium-cli/bin/noctorium version
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: noctorium-cli-${{ matrix.os }}
+          path: build/dist/*
+          retention-days: 14

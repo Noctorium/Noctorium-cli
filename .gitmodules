@@ -1,0 +1,8 @@
+[submodule "base"]
+	path = base
+	url = https://github.com/Noctorium/Noctorium-Base.git
+	branch = main
+[submodule "web"]
+	path = web
+	url = https://github.com/Noctorium/noctorium-web-player.git
+	branch = main
