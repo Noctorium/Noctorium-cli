@@ -51,6 +51,21 @@ jobs:
             build/package/noctorium-cli/bin/noctorium version
           fi
 
+      # The player itself, in a real terminal: script(1) gives it a pseudo-terminal, and after a few
+      # seconds of drawing it is sent q. mpv is stood in for by true, since nothing is played.
+      - name: The player opens and closes in a terminal
+        if: runner.os == 'Linux'
+        env:
+          NOCTORIUM_MPV_PATH: /bin/true
+          NOCTORIUM_CLI_HOME: ${{ runner.temp }}/cli-home
+          TERM: xterm-256color
+        run: |
+          set +e
+          ( sleep 12; printf 'q' ) | timeout 90 script -qec "build/package/noctorium-cli/bin/noctorium" /dev/null > tui.log 2>&1
+          status=$?
+          grep -a -q NOCTORIUM tui.log || { echo "The player drew nothing:"; cat -v tui.log | tail -40; exit 1; }
+          test $status -eq 0 || { echo "The player exited with $status"; cat -v tui.log | tail -40; exit 1; }
+
       - uses: actions/upload-artifact@v4
         with:
           name: noctorium-cli-${{ matrix.os }}
