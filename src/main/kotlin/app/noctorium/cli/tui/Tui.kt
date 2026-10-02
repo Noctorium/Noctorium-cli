@@ -108,7 +108,8 @@ class Tui(
         try {
             var lastFrame = 0L
             while (running) {
-                val input = screen.read(if (dirty.get()) 0 else 120)
+                // One millisecond, not zero, when a frame is waiting: to jline a timeout of zero means forever.
+                val input = screen.read(if (dirty.get()) 1 else 120)
                 if (input != null) {
                     runCatching { handle(input) }.onFailure { toast(it.message ?: "Something went wrong", Row.Tone.BAD) }
                     dirty.set(true)

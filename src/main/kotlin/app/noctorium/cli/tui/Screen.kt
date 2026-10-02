@@ -79,7 +79,7 @@ class Screen : AutoCloseable {
             resized = false
             return Input.Resize
         }
-        var wait = timeoutMs
+        var wait = timeoutMs.coerceAtLeast(1)
         while (true) {
             val c = reader.read(if (decoder.inSequence) 40 else wait)
             if (c == NonBlockingReader.READ_EXPIRED) {

@@ -61,9 +61,10 @@ jobs:
           TERM: xterm-256color
         run: |
           set +e
-          ( sleep 12; printf 'q' ) | timeout 90 script -qec "build/package/noctorium-cli/bin/noctorium" /dev/null > tui.log 2>&1
+          ( sleep 12; if grep -a -q NOCTORIUM tui.log; then touch drawn-before-q; fi; printf 'q' ) | timeout 90 script -qec "build/package/noctorium-cli/bin/noctorium" /dev/null > tui.log 2>&1
           status=$?
           grep -a -q NOCTORIUM tui.log || { echo "The player drew nothing:"; cat -v tui.log | tail -40; exit 1; }
+          test -f drawn-before-q || { echo "Nothing was drawn until a key was pressed"; exit 1; }
           test $status -eq 0 || { echo "The player exited with $status"; cat -v tui.log | tail -40; exit 1; }
 
       - uses: actions/upload-artifact@v4
