@@ -39,7 +39,7 @@ noctorium web                   the web player, for any browser on your network
 
 ## Getting it
 
-One line does it, without admin rights. In PowerShell on Windows, and in a terminal on Linux:
+One line does it, without admin rights. In PowerShell on Windows, and in a terminal on macOS or Linux:
 
 ```powershell
 & ([scriptblock]::Create((irm https://noctorium.vercel.app/install))) --product cli
@@ -59,6 +59,7 @@ Or take the archive from the [latest release](https://github.com/Noctorium/Nocto
 — `noctorium-cli-<version>-windows-x64.zip` or `noctorium-cli-<version>-linux-x64.tar.gz` — and put its
 folder somewhere on your `PATH`. It carries its own Java runtime, so nothing else needs installing except,
 on Linux, mpv from your distribution (`sudo apt install mpv`, `sudo dnf install mpv`, `sudo pacman -S mpv`).
+On a Mac it uses the mpv inside Noctorium.app when that is installed, and fetches its own otherwise.
 yt-dlp is fetched by Noctorium itself and kept current.
 
 ## Signing in
@@ -108,10 +109,11 @@ streams to the addresses of the big hosting companies, and serves yours. The pag
 ## Where things are kept
 
 In the desktop's data folder, under `cli/` — `%LOCALAPPDATA%\Noctorium\cli` on Windows,
-`~/.local/share/noctorium/cli` on Linux — with its own settings, so the two never write over each other.
-mpv and yt-dlp the desktop already downloaded are used rather than fetched again. Secrets (Spotify,
-Last.fm) go to DPAPI on Windows and the desktop keyring through `secret-tool` on Linux; on a machine with
-no keyring they are kept for the session only, never written to a file.
+`~/Library/Application Support/Noctorium/cli` on a Mac, `~/.local/share/noctorium/cli` on Linux — with its
+own settings, so the two never write over each other. mpv and yt-dlp the desktop already downloaded are used
+rather than fetched again. Secrets (Spotify, Last.fm) go to DPAPI on Windows, the Keychain on a Mac and the
+desktop keyring through `secret-tool` on Linux; on a machine with no keyring they are kept for the session
+only, never written to a file.
 
 ## Building
 
