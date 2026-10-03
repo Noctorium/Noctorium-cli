@@ -34,15 +34,24 @@ noctorium web                   the web player, for any browser on your network
   Noctorium Connect to move the music to another device.
 - **The web player.** `noctorium web`, or `w` inside the player, serves Noctorium to the browsers on your
   network. The music plays out of whichever device opened it — a phone in your pocket gets its lock-screen
-  controls — or out of this computer's speakers, with the page as a remote.
+  controls — or out of this computer's speakers, with the page as a remote. The same page, with nothing
+  installed and no accounts, is at [noctorium-music.vercel.app](https://noctorium-music.vercel.app).
 
 ## Getting it
 
-The installer does it for you, without admin rights:
+One line does it, without admin rights. In PowerShell on Windows, and in a terminal on Linux:
 
+```powershell
+& ([scriptblock]::Create((irm https://noctorium.vercel.app/install))) --product cli
 ```
-noctorium-installer-cli --product cli
+
+```bash
+curl -fsSL https://noctorium.vercel.app/install | sh -s -- --product cli
 ```
+
+That fetches the terminal installer from the latest release, checks it against the release's checksums and
+runs it; `irm https://noctorium.vercel.app/install | iex` on its own asks which of Noctorium and the CLI you
+want. With the installer already there, it is `noctorium-installer-cli --product cli`.
 
 Or take the archive from the [latest release](https://github.com/Noctorium/Noctorium-Installer/releases/latest)
 — `noctorium-cli-<version>-windows-x64.zip` or `noctorium-cli-<version>-linux-x64.tar.gz` — and put its
