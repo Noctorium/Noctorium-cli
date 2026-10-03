@@ -9,6 +9,7 @@ import app.noctorium.playback.PlaybackTool
 import app.noctorium.playback.PlaybackToolInstaller
 import app.noctorium.playback.ToolOrigin
 import app.noctorium.settings.AccentPreset
+import app.noctorium.settings.EqualizerPreset
 import app.noctorium.settings.AccountConnectionStatus
 import app.noctorium.settings.ProgressBarStyle
 import app.noctorium.settings.ScrobbleConnectionStatus
@@ -166,6 +167,18 @@ object Settings {
         add(Row.Header("Playing"))
         add(Row.Action("Skip what is not the music in YouTube videos", value = onOff(preferences.skipNonMusic), step = { state.setSkipNonMusic(!preferences.skipNonMusic) }))
         add(Row.Action("Volume boost", value = onOff(state.playback.value.volumeBoostEnabled), step = { state.toggleVolumeBoost() }))
+        // The equaliser's presets, with Off first; a curve of the listener's own, set on the desktop or the
+        // phone, shows as itself and is one of the stops, so stepping past it does not lose it.
+        val equalizer = preferences.equalizer
+        val choices = listOf<EqualizerPreset?>(null) + EqualizerPreset.entries.filter { it != EqualizerPreset.CUSTOM || equalizer.preset == EqualizerPreset.CUSTOM }
+        add(
+            Row.Action("Equaliser", value = if (equalizer.enabled) equalizer.preset.displayName else "Off", step = { by ->
+                when (val next = cycle(choices, equalizer.preset.takeIf { equalizer.enabled }, by)) {
+                    null -> state.updateEqualizer { copy(enabled = false) }
+                    else -> state.setEqualizerPreset(next)
+                }
+            }),
+        )
         add(Row.Action("Add what is played here to YouTube history", value = onOff(preferences.youtubeHistory), step = { state.setYouTubeHistory(!preferences.youtubeHistory) }))
         val sources = listOf<LyricsProviderId?>(null) + LyricsProviderId.entries
         add(

@@ -76,6 +76,12 @@ class SwitchingEngine(
         browser.setLooping(enabled)
     }
 
+    /** Both are told, as with looping, so switching mid-song keeps the sound the listener chose where it can. */
+    override suspend fun setEqualizer(settings: app.noctorium.settings.EqualizerSettings) {
+        computer.setEqualizer(settings)
+        browser.setEqualizer(settings)
+    }
+
     override fun close() {
         computer.close()
         browser.close()
