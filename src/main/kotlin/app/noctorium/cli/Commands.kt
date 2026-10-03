@@ -321,9 +321,9 @@ object Commands {
     private fun tools(): Int = if (ensureTools(quiet = false, force = true)) 0 else 1
 
     /**
-     * yt-dlp and mpv, installed when they are missing -- yt-dlp everywhere, mpv on Windows, where there is no
-     * package manager to ask. On Linux a missing mpv is the distribution's to provide, and the command to get
-     * it is printed.
+     * yt-dlp and mpv, installed when they are missing -- yt-dlp everywhere, mpv on Windows and the Mac, where
+     * there is a build of it to fetch. On Linux a missing mpv is the distribution's to provide, and the command
+     * to get it is printed; on a Mac whose download failed, the Homebrew one.
      */
     private fun ensureTools(quiet: Boolean, force: Boolean = false): Boolean {
         PlaybackToolInstaller.refresh()
@@ -348,8 +348,8 @@ object Commands {
         }
         problems.forEach { println("  ${out.warn("!")} $it") }
         if (after.missingRequired.isNotEmpty()) {
-            if (after.missingRequired.contains(PlaybackTool.MPV) && !System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
-                println("  ${app.noctorium.playback.linuxInstallHint(PlaybackTool.MPV)}")
+            if (after.missingRequired.contains(PlaybackTool.MPV)) {
+                app.noctorium.playback.manualInstallHint(PlaybackTool.MPV, app.noctorium.playback.hostPlatform())?.let { println("  $it") }
             }
             return false
         }

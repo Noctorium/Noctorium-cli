@@ -160,6 +160,8 @@ tasks.processResources { dependsOn(copyWebPlayer) }
 // --- A folder that runs on a machine with no Java: jlink's runtime, and jpackage's launcher ---
 
 val isWindows = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
+val isMac = System.getProperty("os.name").startsWith("Mac", ignoreCase = true)
+val isArm = System.getProperty("os.arch").lowercase().let { it == "aarch64" || it.startsWith("arm") }
 
 val jlinkRuntime by tasks.registering(Exec::class) {
     description = "A trimmed Java runtime for the packaged CLI."
@@ -184,6 +186,44 @@ val jlinkRuntime by tasks.registering(Exec::class) {
     )
 }
 
+/**
+ * On a Mac the folder is put together here rather than by jpackage, whose Mac launcher only comes inside an
+ * application bundle -- and a terminal program that opens as a Dock icon when double-clicked, and has to be
+ * reached at noctorium-cli.app/Contents/MacOS from a shell, is the wrong shape for a command. So it is the
+ * shape the Linux build already has: bin/noctorium, beside the jars and the runtime, the launcher a short
+ * script that finds its own folder (through the link the installer puts on PATH) and starts the runtime.
+ */
+fun macCliFolder(folder: File, jars: File, runtime: File) {
+    fun run(vararg command: String) {
+        val process = ProcessBuilder(*command).inheritIO().start()
+        check(process.waitFor() == 0) { "${command.joinToString(" ")} failed" }
+    }
+    folder.mkdirs()
+    // cp rather than a Gradle copy, which would not keep the runtime's programs executable.
+    run("cp", "-R", runtime.absolutePath, File(folder, "runtime").absolutePath)
+    run("cp", "-R", jars.absolutePath, File(folder, "lib").absolutePath)
+    val options = cliJvmArguments().joinToString(" ") { "\"$it\"" }
+    val launcher = File(folder, "bin/noctorium").apply { parentFile.mkdirs() }
+    launcher.writeText(
+        """
+        |#!/bin/sh
+        |# Noctorium CLI, with the Java runtime it was built with beside it. The installer links this into
+        |# ~/.local/bin, so the link is followed back to the real folder first.
+        |self=${'$'}0
+        |while [ -L "${'$'}self" ]; do
+        |    link=${'$'}(readlink "${'$'}self")
+        |    case ${'$'}link in
+        |        /*) self=${'$'}link ;;
+        |        *) self=${'$'}(dirname "${'$'}self")/${'$'}link ;;
+        |    esac
+        |done
+        |home=${'$'}(cd "${'$'}(dirname "${'$'}self")/.." && pwd -P)
+        |exec "${'$'}home/runtime/bin/java" $options -Dapple.awt.UIElement=true -cp "${'$'}home/lib/*" app.noctorium.cli.MainKt "${'$'}@"
+        |""".trimMargin(),
+    )
+    launcher.setExecutable(true, false)
+}
+
 val packageCli by tasks.registering(Exec::class) {
     description = "The CLI as a folder with its own launcher and runtime: build/package/noctorium-cli."
     dependsOn(tasks.installDist, jlinkRuntime)
@@ -192,6 +232,12 @@ val packageCli by tasks.registering(Exec::class) {
     val destination = layout.buildDirectory.dir("package").get().asFile
     outputs.dir(destination)
     doFirst { destination.deleteRecursively(); destination.mkdirs() }
+    if (isMac) {
+        // Nothing for Exec itself to run; the folder is made in doLast below.
+        commandLine("true")
+        doLast { macCliFolder(File(destination, "noctorium-cli"), input, runtime) }
+        return@registering
+    }
     val launcher = javaToolchains.launcherFor { languageVersion.set(JavaLanguageVersion.of(21)) }
     val jpackage = launcher.map { it.metadata.installationPath.file(if (isWindows) "bin/jpackage.exe" else "bin/jpackage").asFile.absolutePath }
     val mainJar = "noctorium-cli-$appVersion.jar"
@@ -225,10 +271,14 @@ val packageCli by tasks.registering(Exec::class) {
     }
 }
 
-val platformName = if (isWindows) "windows-x64" else "linux-x64"
+val platformName = when {
+    isWindows -> "windows-x64"
+    isMac -> if (isArm) "macos-arm64" else "macos-x64"
+    else -> "linux-x64"
+}
 
 val cliArchive by tasks.registering {
-    description = "The packaged CLI as the release ships it: a zip on Windows, a tar.gz on Linux."
+    description = "The packaged CLI as the release ships it: a zip on Windows, a tar.gz on Linux and the Mac."
     dependsOn(packageCli)
     val folder = layout.buildDirectory.dir("package").get().asFile
     val out = layout.buildDirectory.dir("dist").get().asFile

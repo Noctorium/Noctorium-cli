@@ -1,5 +1,6 @@
 package app.noctorium.cli
 
+import app.noctorium.platform.isMacOs
 import app.noctorium.playback.BackendLocator
 import app.noctorium.settings.AppDirectories
 import java.nio.file.Files
@@ -17,11 +18,16 @@ import java.nio.file.Path
  * fetched a second time, through [BackendLocator.neighbour].
  */
 object CliHome {
-    /** The desktop's folder: `%LOCALAPPDATA%\Noctorium`, or `~/.local/share/noctorium`. */
+    /**
+     * The desktop's folder: `%LOCALAPPDATA%\Noctorium`, `~/Library/Application Support/Noctorium` on a Mac, or
+     * `~/.local/share/noctorium`.
+     */
     val desktop: Path? by lazy {
         val windows = System.getenv("LOCALAPPDATA")?.takeIf(String::isNotBlank)?.let(Path::of)
         if (windows != null) return@lazy windows.resolve("Noctorium")
-        System.getProperty("user.home")?.takeIf(String::isNotBlank)?.let { Path.of(it, ".local", "share", "noctorium") }
+        val home = System.getProperty("user.home")?.takeIf(String::isNotBlank) ?: return@lazy null
+        if (isMacOs()) Path.of(home, "Library", "Application Support", "Noctorium")
+        else Path.of(home, ".local", "share", "noctorium")
     }
 
     /** This program's folder. Named outright by `-Dnoctorium.home`, as the tests do. */

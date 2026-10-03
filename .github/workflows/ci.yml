@@ -1,6 +1,6 @@
 name: CI
 
-# Every push and pull request: the CLI compiles and its tests pass on both systems, against the core its
+# Every push and pull request: the CLI compiles and its tests pass on all three systems, against the core its
 # base/ submodule pins and the page its web/ submodule pins, and the release archive can be made. Releases
 # themselves are cut by Noctorium-Installer, which builds this the same way.
 on:
@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     steps:
@@ -62,6 +62,21 @@ jobs:
         run: |
           set +e
           ( sleep 12; if grep -a -q NOCTORIUM tui.log; then touch drawn-before-q; fi; printf 'q' ) | timeout 90 script -qec "build/package/noctorium-cli/bin/noctorium" /dev/null > tui.log 2>&1
+          status=$?
+          grep -a -q NOCTORIUM tui.log || { echo "The player drew nothing:"; cat -v tui.log | tail -40; exit 1; }
+          test -f drawn-before-q || { echo "Nothing was drawn until a key was pressed"; exit 1; }
+          test $status -eq 0 || { echo "The player exited with $status"; cat -v tui.log | tail -40; exit 1; }
+
+      # The same on a Mac, whose script(1) is BSD's and takes the command last, and which has no timeout(1).
+      - name: The player opens and closes in a Mac terminal
+        if: runner.os == 'macOS'
+        env:
+          NOCTORIUM_MPV_PATH: /usr/bin/true
+          NOCTORIUM_CLI_HOME: ${{ runner.temp }}/cli-home
+          TERM: xterm-256color
+        run: |
+          set +e
+          ( sleep 15; if grep -a -q NOCTORIUM tui.log; then touch drawn-before-q; fi; printf 'q' ) | perl -e 'alarm 120; exec @ARGV' script -q /dev/null build/package/noctorium-cli/bin/noctorium > tui.log 2>&1
           status=$?
           grep -a -q NOCTORIUM tui.log || { echo "The player drew nothing:"; cat -v tui.log | tail -40; exit 1; }
           test -f drawn-before-q || { echo "Nothing was drawn until a key was pressed"; exit 1; }

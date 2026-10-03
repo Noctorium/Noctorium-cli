@@ -18,6 +18,13 @@ import java.util.concurrent.TimeUnit
  */
 class TerminalBridge : SystemBridge {
     private val isWindows = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
+    private val isMac = System.getProperty("os.name").startsWith("Mac", ignoreCase = true)
+
+    /**
+     * A Mac has no DISPLAY to say there is a screen; a terminal there has one unless it is somebody signed in
+     * over ssh, whose browser and clipboard are on the machine they are typing at and not on this one.
+     */
+    private val macDesktop: Boolean get() = isMac && System.getenv("SSH_CONNECTION").isNullOrBlank()
 
     /** Something worth telling the listener: a link that wants opening, or text that was copied. */
     sealed interface Notice {
@@ -39,6 +46,7 @@ class TerminalBridge : SystemBridge {
         val opened = runCatching {
             val command = when {
                 isWindows -> listOf("rundll32", "url.dll,FileProtocolHandler", url)
+                macDesktop -> listOf("/usr/bin/open", url)
                 System.getenv("DISPLAY").isNullOrBlank() && System.getenv("WAYLAND_DISPLAY").isNullOrBlank() -> null
                 onPath("xdg-open") -> listOf("xdg-open", url)
                 else -> null
@@ -55,6 +63,7 @@ class TerminalBridge : SystemBridge {
         val copied = runCatching {
             val command = when {
                 isWindows -> listOf("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "\$input | Set-Clipboard")
+                macDesktop -> listOf("/usr/bin/pbcopy")
                 !System.getenv("WAYLAND_DISPLAY").isNullOrBlank() && onPath("wl-copy") -> listOf("wl-copy")
                 !System.getenv("DISPLAY").isNullOrBlank() && onPath("xclip") -> listOf("xclip", "-selection", "clipboard")
                 !System.getenv("DISPLAY").isNullOrBlank() && onPath("xsel") -> listOf("xsel", "--clipboard", "--input")
@@ -75,6 +84,7 @@ class TerminalBridge : SystemBridge {
         runCatching {
             when {
                 isWindows -> ProcessBuilder("explorer.exe", "/select,${path.toAbsolutePath()}").start()
+                macDesktop -> ProcessBuilder("/usr/bin/open", "-R", path.toAbsolutePath().toString()).start()
                 onPath("xdg-open") && !System.getenv("DISPLAY").isNullOrBlank() -> ProcessBuilder("xdg-open", folder.toString()).start()
                 else -> null
             }
