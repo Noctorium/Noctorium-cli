@@ -11,7 +11,6 @@ import app.noctorium.playback.YtDlpService
 import app.noctorium.settings.SecureCredentialStore
 import app.noctorium.update.UpdateInstaller
 import app.noctorium.update.Version
-import java.net.InetAddress
 
 /** The version this build was made as, from the resource the build writes. */
 val cliVersion: String by lazy {
@@ -54,8 +53,6 @@ fun cliAppState(parts: CliParts, engine: PlaybackEngine): AppState = AppState(
 )
 
 private fun deviceName(): String {
-    val machine = System.getenv("COMPUTERNAME")?.takeIf(String::isNotBlank)
-        ?: runCatching { InetAddress.getLocalHost().hostName }.getOrNull()?.takeIf(String::isNotBlank)
-        ?: "This computer"
+    val machine = app.noctorium.platform.computerName() ?: "This computer"
     return "$machine (terminal)"
 }
