@@ -51,6 +51,39 @@ jobs:
             build/package/noctorium-cli/bin/noctorium version
           fi
 
+      # Started from a desktop's menu, as an Arch package's entry once ran it by mistake: no terminal on any of
+      # its streams and no TERM, so the player cannot be drawn. It opens the window app instead -- here a
+      # stand-in at the path the .deb, the .rpm and the Arch package use, which writes down that it was opened
+      # and by whom -- and with no window app to open it says it needs a terminal, at once, rather than after
+      # starting everything.
+      - name: Started from a menu, it opens the window app
+        if: runner.os == 'Linux'
+        env:
+          NOCTORIUM_MPV_PATH: /bin/true
+          NOCTORIUM_YTDLP_PATH: /bin/true
+          NOCTORIUM_CLI_HOME: ${{ runner.temp }}/cli-home
+          NOCTORIUM_NO_UPDATE: "1"
+        run: |
+          set -u
+          opened="$RUNNER_TEMP/window-app-opened"
+          sudo mkdir -p /opt/noctorium/bin
+          sudo tee /opt/noctorium/bin/Noctorium > /dev/null <<EOF
+          #!/bin/sh
+          echo "\$NOCTORIUM_OPENED_BY_CLI" > "$opened"
+          EOF
+          sudo chmod 755 /opt/noctorium/bin/Noctorium
+          env -u TERM build/package/noctorium-cli/bin/noctorium < /dev/null > menu.log 2>&1; status=$?
+          for i in $(seq 1 40); do [ -s "$opened" ] && break; sleep 0.25; done
+          test "$status" -eq 0 || { echo "It exited with $status:"; cat menu.log; exit 1; }
+          test "$(cat "$opened" 2>/dev/null)" = 1 || { echo "The window app was not opened:"; cat menu.log; exit 1; }
+          sudo rm -rf /opt/noctorium
+          started=$(date +%s)
+          env -u TERM build/package/noctorium-cli/bin/noctorium < /dev/null > none.log 2>&1; status=$?
+          took=$(( $(date +%s) - started ))
+          test "$status" -eq 2 || { echo "With no window app it exited with $status:"; cat none.log; exit 1; }
+          grep -q "needs a terminal" none.log || { echo "It did not say it needs a terminal:"; cat none.log; exit 1; }
+          test "$took" -lt 10 || { echo "It took $took s to say so"; exit 1; }
+
       # The player itself, in a real terminal: script(1) gives it a pseudo-terminal, and after a few
       # seconds of drawing it is sent q. mpv and yt-dlp are stood in for by true, since nothing is played --
       # and a first start would otherwise go to fetch yt-dlp, which a shared runner is often refused. The daily

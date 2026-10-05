@@ -88,6 +88,15 @@ object Commands {
     private fun state(parts: CliParts, engine: app.noctorium.playback.PlaybackEngine) = cliAppState(parts, engine)
 
     private fun player(startWith: String?): Int {
+        // Started from a menu or a shortcut rather than a terminal, there is nowhere to draw the player, and
+        // what was wanted is the window (see WindowApp). Decided before anything is started -- the tools,
+        // Connect, the engine -- so that either way it happens at once, rather than after seconds of starting
+        // a player nobody can see.
+        if (WindowApp.startedWithoutTerminal()) {
+            if (WindowApp.open()) return 0
+            System.err.println("This needs a terminal. For one thing at a time, see: noctorium help")
+            return 2
+        }
         val parts = parts()
         if (!ensureTools(quiet = true)) return 1
         // Whatever an interrupted update left beside the folder, cleared before anything else is started.
