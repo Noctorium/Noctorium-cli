@@ -1,5 +1,6 @@
 package app.noctorium.cli
 
+import app.noctorium.cli.update.CliUpdates
 import app.noctorium.connect.DeviceKind
 import app.noctorium.core.AppState
 import app.noctorium.discord.DiscordPresenceManager
@@ -9,7 +10,6 @@ import app.noctorium.playback.AccountProbe
 import app.noctorium.playback.PlaybackEngine
 import app.noctorium.playback.YtDlpService
 import app.noctorium.settings.SecureCredentialStore
-import app.noctorium.update.UpdateInstaller
 import app.noctorium.update.Version
 
 /** The version this build was made as, from the resource the build writes. */
@@ -28,6 +28,9 @@ class CliParts(
     val credentials: SecureCredentialStore = SecureCredentialStore(rememberForSession = true),
 ) {
     val downloads = DownloadManager(backend, converter = AudioConverter())
+
+    /** Updating this copy: found out once, when something first asks, and shared by everything that does. */
+    val updates: CliUpdates by lazy { CliUpdates.forThisCopy(Version.parse(cliVersion)) }
 }
 
 /**
@@ -38,6 +41,9 @@ class CliParts(
  * (handed in, because `noctorium web` plays in a browser), and the SoundCloud writes, which on the desktop go
  * through its hidden Chromium and here go over plain HTTP -- SoundCloud may ask for a captcha for those, and
  * the message that comes back says so.
+ *
+ * Updating is the other difference. AppState does not check at launch here: [CliUpdates] does, at most once a
+ * day and only for the commands that stay open, and installs what it finds itself.
  */
 fun cliAppState(parts: CliParts, engine: PlaybackEngine): AppState = AppState(
     ytDlp = parts.backend,
@@ -49,7 +55,8 @@ fun cliAppState(parts: CliParts, engine: PlaybackEngine): AppState = AppState(
     discordPresence = DiscordPresenceManager(),
     deviceName = { deviceName() },
     deviceKind = DeviceKind.DESKTOP,
-    updateInstaller = UpdateInstaller.none(Version.parse(cliVersion)),
+    updateInstaller = parts.updates.installer,
+    checkForUpdatesAtLaunch = false,
 )
 
 private fun deviceName(): String {

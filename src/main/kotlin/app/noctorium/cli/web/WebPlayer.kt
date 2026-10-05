@@ -3,6 +3,7 @@ package app.noctorium.cli.web
 import app.noctorium.cli.CliParts
 import app.noctorium.cli.TerminalBridge
 import app.noctorium.cli.tui.WebSwitch
+import app.noctorium.cli.update.CliUpdates
 import app.noctorium.core.AppState
 import app.noctorium.playback.MpvPlaybackEngine
 import app.noctorium.settings.AppDirectories
@@ -83,7 +84,7 @@ class WebPlayer(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val wire = Wire(state, player)
     private val proxy = AudioProxy(player.browser, parts.backend)
-    private val commands = WebCommands(state, player, scope) { notice(it) }
+    private val commands = WebCommands(state, player, scope, checkForUpdates = ::checkForUpdates) { notice(it) }
     private val connections = ConcurrentHashMap.newKeySet<Connection>()
     private var server: EmbeddedServer<*, *>? = null
     private var stopped = CountDownLatch(1)
@@ -208,6 +209,24 @@ class WebPlayer(
     }
 
     private val recentNotices = ConcurrentHashMap<String, Long>()
+
+    /** Something every open page should show in passing: `good`, `bad`, or `normal`. */
+    fun announce(text: String, tone: String = "normal") = notice(text, tone)
+
+    /**
+     * A page asked whether there is a newer Noctorium CLI. The answer, whatever it is, comes back to every
+     * page, and when there is one this copy can install, it is installed: the page's button is the same
+     * question as the settings row in the terminal.
+     */
+    private fun checkForUpdates() {
+        scope.launch(Dispatchers.IO) {
+            notice("Looking for a newer Noctorium CLI…")
+            val result = parts.updates.run(install = true)
+            parts.updates.headline(result, asked = true)?.let { line ->
+                notice(line, if (result is CliUpdates.Result.Failed) "bad" else "normal")
+            }
+        }
+    }
 
     private fun notice(text: String, tone: String = "normal") {
         val now = System.currentTimeMillis()

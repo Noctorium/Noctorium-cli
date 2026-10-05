@@ -38,6 +38,8 @@ class WebCommands(
     private val state: AppState,
     private val engine: SwitchingEngine,
     private val scope: CoroutineScope,
+    /** The settings page's "Check for updates", which is the terminal player's own updater here. */
+    private val checkForUpdates: () -> Unit = { state.checkForUpdates() },
     private val notice: (String) -> Unit,
 ) {
     /** Does [command]. Returns null when it was understood, or why not. */
@@ -194,7 +196,7 @@ class WebCommands(
             "playOn" -> state.connect.value.devices.firstOrNull { it.id == command.string("id") }?.let(state::playOn) ?: return "That device is gone"
             "bringBack" -> state.bringPlaybackBack()
             "stopControlling" -> state.stopControlling()
-            "checkUpdates" -> state.checkForUpdates()
+            "checkUpdates" -> checkForUpdates()
 
             // --- Accounts ---
             "phoneSignIn" -> state.receiveYouTubeSignIn()

@@ -192,6 +192,8 @@ val jlinkRuntime by tasks.registering(Exec::class) {
  * reached at noctorium-cli.app/Contents/MacOS from a shell, is the wrong shape for a command. So it is the
  * shape the Linux build already has: bin/noctorium, beside the jars and the runtime, the launcher a short
  * script that finds its own folder (through the link the installer puts on PATH) and starts the runtime.
+ * It also tells the program which folder that is, as jpackage's launchers do with jpackage.app-path, since
+ * that is the folder an update replaces.
  */
 fun macCliFolder(folder: File, jars: File, runtime: File) {
     fun run(vararg command: String) {
@@ -218,7 +220,7 @@ fun macCliFolder(folder: File, jars: File, runtime: File) {
         |    esac
         |done
         |home=${'$'}(cd "${'$'}(dirname "${'$'}self")/.." && pwd -P)
-        |exec "${'$'}home/runtime/bin/java" $options -Dapple.awt.UIElement=true -cp "${'$'}home/lib/*" app.noctorium.cli.MainKt "${'$'}@"
+        |exec "${'$'}home/runtime/bin/java" $options -Dapple.awt.UIElement=true "-Dnoctorium.cli.folder=${'$'}home" -cp "${'$'}home/lib/*" app.noctorium.cli.MainKt "${'$'}@"
         |""".trimMargin(),
     )
     launcher.setExecutable(true, false)

@@ -53,13 +53,15 @@ jobs:
 
       # The player itself, in a real terminal: script(1) gives it a pseudo-terminal, and after a few
       # seconds of drawing it is sent q. mpv and yt-dlp are stood in for by true, since nothing is played --
-      # and a first start would otherwise go to fetch yt-dlp, which a shared runner is often refused.
+      # and a first start would otherwise go to fetch yt-dlp, which a shared runner is often refused. The daily
+      # update check is switched off too, so a run never asks GitHub about releases on a shared address.
       - name: The player opens and closes in a terminal
         if: runner.os == 'Linux'
         env:
           NOCTORIUM_MPV_PATH: /bin/true
           NOCTORIUM_YTDLP_PATH: /bin/true
           NOCTORIUM_CLI_HOME: ${{ runner.temp }}/cli-home
+          NOCTORIUM_NO_UPDATE: "1"
           TERM: xterm-256color
         run: |
           set +e
@@ -76,6 +78,7 @@ jobs:
           NOCTORIUM_MPV_PATH: /usr/bin/true
           NOCTORIUM_YTDLP_PATH: /usr/bin/true
           NOCTORIUM_CLI_HOME: ${{ runner.temp }}/cli-home
+          NOCTORIUM_NO_UPDATE: "1"
           TERM: xterm-256color
         run: |
           set +e

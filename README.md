@@ -62,6 +62,16 @@ on Linux, mpv from your distribution (`sudo apt install mpv`, `sudo dnf install 
 On a Mac it uses the mpv inside Noctorium.app when that is installed, and fetches its own otherwise.
 yt-dlp is fetched by Noctorium itself and kept current.
 
+### Updates
+
+The player and `noctorium web` look for a newer release once a day, and install it by themselves: the new
+copy is checked against the release's checksums, unpacked beside the old one, and takes over when you quit
+— never underneath a player that is running. `noctorium update` does the same on the spot, and
+`noctorium update --check` only says whether there is one. Settings → *Update automatically* turns the daily
+check off, and so does `NOCTORIUM_NO_UPDATE=1` in the environment. A copy in a folder that is not yours to
+change — under Program Files, `/usr` or `/opt`, or a build of your own — is told about new releases and left
+for whatever put it there to update.
+
 ## Signing in
 
 A terminal cannot show Google's or SoundCloud's sign-in page, so the session comes from somewhere already

@@ -2,6 +2,7 @@ package app.noctorium.cli
 
 import app.noctorium.cli.tui.Tui
 import app.noctorium.cli.tui.formatTime
+import app.noctorium.cli.update.CliUpdates
 import app.noctorium.cli.web.WebPlayer
 import app.noctorium.core.AppState
 import app.noctorium.domain.ProviderType
@@ -11,6 +12,11 @@ import app.noctorium.playback.PlaybackToolInstaller
 import app.noctorium.playback.ToolOrigin
 import app.noctorium.settings.AccountConnectionStatus
 import app.noctorium.settings.ScrobbleConnectionStatus
+import app.noctorium.update.Version
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
@@ -40,9 +46,14 @@ object Commands {
         |  noctorium logout <youtube|soundcloud|spotify|lastfm|listenbrainz>
         |  noctorium status              accounts, tools and where things are kept
         |  noctorium tools               install or update yt-dlp and mpv
+        |  noctorium update              install a newer Noctorium CLI, if there is one
+        |      --check                     only say whether there is
         |  noctorium version
         |
         |In the player, ? lists the keys.
+        |
+        |The player and noctorium web look for a newer version once a day and install it by themselves; it
+        |takes over when you quit. Settings switches that off, and so does NOCTORIUM_NO_UPDATE=1.
     """.trimMargin()
 
     fun run(arguments: List<String>): Int {
@@ -57,6 +68,7 @@ object Commands {
             "logout" -> logout(rest)
             "status" -> status()
             "tools", "doctor" -> tools()
+            "update", "upgrade" -> UpdateCommand.run(rest, CliUpdates.forThisCopy(Version.parse(cliVersion)))
             "version", "--version", "-v", "-V" -> { println("noctorium $cliVersion"); 0 }
             "help", "--help", "-h" -> { println(usage); 0 }
             else -> {
@@ -78,6 +90,8 @@ object Commands {
     private fun player(startWith: String?): Int {
         val parts = parts()
         if (!ensureTools(quiet = true)) return 1
+        // Whatever an interrupted update left beside the folder, cleared before anything else is started.
+        runCatching { parts.updates.installer.tidy() }
         val engine = WebPlayer.engineFor(parts, preferBrowser = false)
         val state = state(parts, engine)
         val web = WebPlayer(state, parts, engine)
@@ -148,6 +162,7 @@ object Commands {
         }
         val parts = parts()
         if (!ensureTools(quiet = false)) return 1
+        runCatching { parts.updates.installer.tidy() }
         val engine = WebPlayer.engineFor(parts, preferBrowser = true)
         val state = state(parts, engine)
         val web = WebPlayer(state, parts, engine)
@@ -177,7 +192,16 @@ object Commands {
             if (notice is TerminalBridge.Notice.OpenLink && !notice.opened) println("  Open: ${notice.url}")
         }
         if (open) runCatching { parts.bridge.openUrl(web.localAddress!!) }
-        Runtime.getRuntime().addShutdownHook(Thread { web.stop(); state.close() })
+        // Once a day, in the background, as the player does. What it says goes to this terminal and to every
+        // open page; nothing it does touches what is playing, and the new copy only takes over after Ctrl+C.
+        val background = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        parts.updates.automatically(background, state.settings.value.preferences.updates.checkOnLaunch) { result ->
+            parts.updates.headline(result, asked = false)?.let { line ->
+                println("  ${if (result is CliUpdates.Result.Failed) out.dim(line) else out.accent(line)}")
+                web.announce(line, if (result is CliUpdates.Result.Failed) "normal" else "good")
+            }
+        }
+        Runtime.getRuntime().addShutdownHook(Thread { background.cancel(); web.stop(); state.close() })
         web.join()
         return 0
     }
@@ -312,6 +336,16 @@ object Commands {
             println()
             println("  ${out.dim("Kept in")}         ${CliHome.own}")
             println("  ${out.dim("Secrets")}         ${if (parts.credentials.persistent) "the system's keyring" else "memory only (no keyring here)"}")
+            val updates = parts.updates
+            val off = updates.automaticOffBecause(settings.preferences.updates.checkOnLaunch)
+            println(
+                "  ${out.dim("Updates")}         " + when {
+                    !updates.canInstall -> updates.installer.installation.advice
+                    off != null -> "installed in ${updates.installer.installation.folder}; automatic updates are off ($off)"
+                    else -> "installed in ${updates.installer.installation.folder}; checked for once a day"
+                },
+            )
+            updates.installer.waiting()?.let { println(" ".repeat(18) + "$it is installed beside it, and takes over once this copy has quit") }
             return 0
         } finally {
             state.close()

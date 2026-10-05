@@ -3,6 +3,7 @@ package app.noctorium.cli.tui
 import app.noctorium.cli.CliHome
 import app.noctorium.cli.DesktopSignIn
 import app.noctorium.cli.cliVersion
+import app.noctorium.cli.update.CliUpdates
 import app.noctorium.domain.ProviderType
 import app.noctorium.lyrics.LyricsProviderId
 import app.noctorium.playback.PlaybackTool
@@ -224,7 +225,33 @@ object Settings {
                 ),
             )
         }
-        add(Row.Action("Check for updates", value = state.updates.value.currentVersion.ifBlank { cliVersion }, run = { state.checkForUpdates() }))
+        // Updating: the check by hand, and whether it happens by itself once a day. A copy that cannot replace
+        // itself -- a build, or one a package manager owns -- is still told about new versions, and says how
+        // it should be updated instead.
+        val updates = tui.parts.updates
+        val updating = updates.status.value
+        add(
+            Row.Action(
+                "Check for updates",
+                value = when {
+                    updating.downloading != null -> "Downloading… ${(updating.downloading * 100).toInt()}%"
+                    updating.checking -> "Checking…"
+                    updating.waiting != null -> "$cliVersion · ${updating.waiting} takes over when you quit"
+                    else -> cliVersion
+                },
+                tone = if (updating.waiting != null) Row.Tone.GOOD else Row.Tone.NORMAL,
+                run = { tui.checkForUpdates() },
+            ),
+        )
+        val automatic = preferences.updates.checkOnLaunch
+        add(
+            Row.Action(
+                if (updates.canInstall) "Update automatically" else "Look for updates once a day",
+                value = if (CliUpdates.disabledByEnvironment(System::getenv)) "Off: ${CliUpdates.ENVIRONMENT} is set" else onOff(automatic),
+                step = { state.setUpdateCheckOnLaunch(!automatic) },
+            ),
+        )
+        if (!updates.canInstall) add(Row.Note(updates.installer.installation.advice))
         add(Row.Action("Run the diagnostics", hint = "yt-dlp, mpv, the network and the folders", run = { state.runDiagnostics(); tui.toast("Checking…") }))
         settings.diagnostics.forEach { result ->
             add(Row.Note("${result.name}: ${result.detail}", when (result.level.name) { "PASS" -> Row.Tone.GOOD; "WARNING" -> Row.Tone.WARN; else -> Row.Tone.BAD }))

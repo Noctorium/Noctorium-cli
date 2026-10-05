@@ -3,6 +3,7 @@ package app.noctorium.cli.tui
 import app.noctorium.cli.CliParts
 import app.noctorium.cli.TerminalBridge
 import app.noctorium.cli.cliVersion
+import app.noctorium.cli.update.CliUpdates
 import app.noctorium.core.AppState
 import app.noctorium.domain.Track
 import app.noctorium.playback.PlaybackStatus
@@ -105,6 +106,12 @@ class Tui(
         // Whether yt-dlp and mpv are there, for Settings to say; it reads the disk, so not on this thread.
         scope.launch { app.noctorium.playback.PlaybackToolInstaller.refresh() }
         startWith?.let { query -> scope.launch { Startup.playFirst(this@Tui, query) } }
+        // At most once a day, a little after opening, on a thread of its own. An update it finds is
+        // installed beside this copy without asking and takes over at the next start; nothing about what is
+        // playing changes, and a failure is one quiet line.
+        parts.updates.automatically(scope, state.settings.value.preferences.updates.checkOnLaunch) { result ->
+            announceUpdate(result, asked = false)
+        }
         try {
             var lastFrame = 0L
             while (running) {
@@ -143,6 +150,7 @@ class Tui(
         state.account.redraw()
         state.artistFollow.redraw()
         app.noctorium.playback.PlaybackToolInstaller.state.redraw()
+        parts.updates.status.redraw()
         state.playback.map { it.status to it.track?.queueKey }.distinctUntilChanged().redraw()
         scope.launch {
             state.settings.collect { settings ->
@@ -155,15 +163,8 @@ class Tui(
         scope.launch { state.downloadState.collect { d -> d.message?.let { toast(it); state.clearDownloadMessage() } } }
         scope.launch { state.connect.collect { c -> c.message?.let { toast(it); state.dismissConnectMessage() } } }
         scope.launch { state.account.collect { a -> a.message?.let { toast(it); state.clearNoctoriumMessage() } } }
-        scope.launch {
-            state.updates.collect { u ->
-                u.message?.let { toast(it); state.clearUpdateMessage() }
-                u.prompt?.let { update ->
-                    toast("Noctorium CLI ${update.version} is out: noctorium-installer-cli, or ${update.pageUrl}", Row.Tone.ACCENT, 10)
-                    state.dismissUpdate()
-                }
-            }
-        }
+        // Updates are [CliUpdates]'s here, not AppState's, which does not check at launch in a terminal.
+        scope.launch { state.updates.collect { u -> u.message?.let { toast(it); state.clearUpdateMessage() } } }
         scope.launch {
             state.signInTransfer.collect { transfer ->
                 when (transfer) {
@@ -402,6 +403,32 @@ class Tui(
             }
             else -> Unit
         }
+    }
+
+    /** Settings' "Check for updates": the same as the daily check, asked for, so it always answers. */
+    internal fun checkForUpdates() {
+        if (parts.updates.status.value.checking) { toast("Already looking for an update…"); return }
+        toast("Looking for a newer Noctorium CLI…")
+        scope.launch(Dispatchers.IO) { announceUpdate(parts.updates.run(install = true), asked = true) }
+    }
+
+    /**
+     * What came of a check, as a toast. The daily one says nothing when nothing is new, and a failure of it
+     * is a quiet line rather than an alarm: it changes nothing, and tomorrow's check will try again.
+     */
+    private fun announceUpdate(result: CliUpdates.Result, asked: Boolean) {
+        when (result) {
+            is CliUpdates.Result.Installed -> toast(result.message, Row.Tone.GOOD, 8)
+            is CliUpdates.Result.Available -> toast(
+                if (parts.updates.canInstall) "Noctorium CLI ${result.update.version} is out: Settings installs it"
+                else "Noctorium CLI ${result.update.version} is out: Settings says how to update this copy",
+                Row.Tone.ACCENT,
+                10,
+            )
+            is CliUpdates.Result.Failed -> parts.updates.headline(result, asked)?.let { toast(it, if (asked) Row.Tone.BAD else Row.Tone.QUIET, 6) }
+            CliUpdates.Result.UpToDate -> parts.updates.headline(result, asked)?.let { toast(it, Row.Tone.GOOD) }
+        }
+        invalidate()
     }
 
     internal fun like(track: Track) {
