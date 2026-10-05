@@ -72,13 +72,14 @@ jobs:
           echo "\$NOCTORIUM_OPENED_BY_CLI" > "$opened"
           EOF
           sudo chmod 755 /opt/noctorium/bin/Noctorium
-          env -u TERM build/package/noctorium-cli/bin/noctorium < /dev/null > menu.log 2>&1; status=$?
+          # The shell stops at the first command that fails, so each exit status is caught rather than left to it.
+          status=0; env -u TERM build/package/noctorium-cli/bin/noctorium < /dev/null > menu.log 2>&1 || status=$?
           for i in $(seq 1 40); do [ -s "$opened" ] && break; sleep 0.25; done
           test "$status" -eq 0 || { echo "It exited with $status:"; cat menu.log; exit 1; }
           test "$(cat "$opened" 2>/dev/null)" = 1 || { echo "The window app was not opened:"; cat menu.log; exit 1; }
           sudo rm -rf /opt/noctorium
           started=$(date +%s)
-          env -u TERM build/package/noctorium-cli/bin/noctorium < /dev/null > none.log 2>&1; status=$?
+          status=0; env -u TERM build/package/noctorium-cli/bin/noctorium < /dev/null > none.log 2>&1 || status=$?
           took=$(( $(date +%s) - started ))
           test "$status" -eq 2 || { echo "With no window app it exited with $status:"; cat none.log; exit 1; }
           grep -q "needs a terminal" none.log || { echo "It did not say it needs a terminal:"; cat none.log; exit 1; }
