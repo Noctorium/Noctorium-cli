@@ -95,7 +95,10 @@ class CliInstallationTest {
     fun `a copy under Program Files belongs to whoever put it there`() {
         val programFiles = here.resolve("Program Files")
         val folder = installed("windows", programFiles.resolve("Noctorium CLI"))
-        val environment: (String) -> String? = { if (it == "ProgramFiles") programFiles.toString() else null }
+        // As the folder will be read, through any link on the way: a Mac's temporary folder is under /var,
+        // which is a link to /private/var.
+        val real = programFiles.toRealPath().toString()
+        val environment: (String) -> String? = { if (it == "ProgramFiles") real else null }
         val found = CliInstallation.detect(CliInstallation.Facts("windows", folder.resolve("noctorium.exe").toString(), null, environment))
         assertEquals(UpdateChannel.UNMANAGED, found.channel)
         assertTrue("belongs to the system" in found.advice, found.advice)

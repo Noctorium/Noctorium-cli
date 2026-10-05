@@ -127,8 +127,10 @@ data class CliInstallation(
             if (windows) {
                 val places = listOf("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "SystemRoot", "ProgramData")
                     .mapNotNull { environment(it)?.takeIf(String::isNotBlank) }
-                val here = folder.trimEnd('\\', '/').lowercase() + "\\"
-                return places.any { place -> here.startsWith(place.trimEnd('\\', '/').lowercase() + "\\") }
+                // Either slash, which Windows takes as the same thing, so a path written either way is read alike.
+                fun normal(path: String) = path.replace('/', '\\').trimEnd('\\').lowercase() + "\\"
+                val here = normal(folder)
+                return places.any { place -> here.startsWith(normal(place)) }
             }
             val here = folder.trimEnd('/') + "/"
             return UNIX_SYSTEM_PLACES.any { here.startsWith("$it/") }
