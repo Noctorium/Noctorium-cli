@@ -141,9 +141,11 @@ class QueueWebTest {
         assertEquals(queued.drop(1).toSet(), queue.tracks.drop(1).toSet())
 
         assertEquals("Give the playlist a name first", run("saveQueue", "title" to "   "))
-        assertNull(run("saveQueue", "title" to "Night drive"))
-        waitFor { state.library.value.localPlaylists.any { it.title == "Night drive" } }
-        val saved = state.library.value.localPlaylists.first { it.title == "Night drive" }
+        // A name no other test saves under: the playlists are kept on disk, shared by every test, and one left by
+        // another test would be found here instead.
+        assertNull(run("saveQueue", "title" to "Night drive in the browser"))
+        waitFor { state.library.value.localPlaylists.any { it.title == "Night drive in the browser" } }
+        val saved = state.library.value.localPlaylists.first { it.title == "Night drive in the browser" }
         try {
             assertEquals(queue.tracks, saved.tracks)
         } finally {

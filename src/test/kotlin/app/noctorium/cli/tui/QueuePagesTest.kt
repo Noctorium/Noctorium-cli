@@ -186,10 +186,11 @@ class QueuePagesTest {
 
         press(Input.Text("N"))
         assertIs<Overlay.Prompt>(tui.overlays.last())
-        "Night drive".forEach { press(Input.Text("$it")) }
+        // A name no other test saves under, as in QueueWebTest.
+        "Night drive in the terminal".forEach { press(Input.Text("$it")) }
         press(Input.Key(Keys.ENTER))
-        waitFor { state.library.value.localPlaylists.any { it.title == "Night drive" } }
-        val saved = state.library.value.localPlaylists.first { it.title == "Night drive" }
+        waitFor { state.library.value.localPlaylists.any { it.title == "Night drive in the terminal" } }
+        val saved = state.library.value.localPlaylists.first { it.title == "Night drive in the terminal" }
         try {
             assertEquals(queue.tracks, saved.tracks)
         } finally {
