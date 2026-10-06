@@ -27,6 +27,9 @@ import kotlin.test.assertTrue
  * The queue is made by hand and autoplay's songs handed to it directly. Core asks a service for them itself once
  * the queue is nearly over, a few seconds after it gets there; so a test that takes the queue there either hands
  * the songs over first, under the key core would file them by, or switches autoplay off again well before then.
+ * Once one of them has joined the queue, the rest no longer follow its last song, and core takes them away
+ * whenever it next looks -- which, on a busy machine, can be in the middle of a test; so what is done to them is
+ * done to a queue made afresh.
  * With `-Dnoctorium.renderTui=<folder>` each frame is also written there as text.
  */
 class QueuePagesTest {
@@ -150,18 +153,21 @@ class QueuePagesTest {
         select { it.suggestion == 0 }
         press(Input.Text("a"))
         assertEquals(queued + offered[0], queue.tracks)
-        assertEquals(offered.drop(1), queue.suggestions)
+        assertFalse(offered[0] in queue.suggestions)
 
-        select { it.suggestion == 0 }
+        withSuggestions()
+        select { it.suggestion == 1 }
         press(Input.Text("x"))
-        assertEquals(listOf(offered[2]), queue.suggestions)
-        assertEquals(queued + offered[0], queue.tracks)
+        assertEquals(listOf(offered[0], offered[2]), queue.suggestions)
+        assertEquals(queued, queue.tracks)
 
         // A suggestion keeps autoplay's order: it is not moved like the queue's own.
         select { it.suggestion == 0 }
         press(Input.Text("J"))
         assertTrue("Autoplay's songs keep their order" in text(render("move")).joinToString("\n"))
 
+        // With the one before it, as Enter on any of them does.
+        select { it.suggestion == 1 }
         press(Input.Key(Keys.ENTER))
         waitFor { queue.current == offered[2] }
         // The queue now ends on a song core would look for more after; autoplay goes off before it asks.

@@ -33,7 +33,9 @@ import kotlin.test.assertTrue
  *
  * As in the terminal's own test (QueuePagesTest), autoplay's songs are handed to the queue directly, under the
  * key core files them by, so core never asks a service for any; and whatever takes the queue to its end turns
- * autoplay off again before core would.
+ * autoplay off again before core would. Once one of them has joined the queue, the rest no longer follow its last
+ * song, and core takes them away whenever it next looks -- which, on a busy machine, can be in the middle of a
+ * test; so what is done to them is done to a queue made afresh.
  */
 class QueueWebTest {
     private val parts = CliParts()
@@ -105,18 +107,21 @@ class QueueWebTest {
         withSuggestions()
         assertNull(run("keepSuggestion", "key" to offered[0].queueKey, "index" to 0))
         assertEquals(queued + offered[0], queue.tracks)
+        assertFalse(offered[0] in queue.suggestions)
+
+        withSuggestions()
         // Named by key, the index the page drew it at no longer matters.
-        assertNull(run("removeSuggestion", "key" to offered[2].queueKey, "index" to 2))
-        assertEquals(listOf(offered[1]), queue.suggestions)
+        assertNull(run("removeSuggestion", "key" to offered[2].queueKey, "index" to 0))
+        assertEquals(offered.take(2), queue.suggestions)
         assertEquals("That song is no longer lined up", run("removeSuggestion", "key" to offered[2].queueKey, "index" to 0))
         assertEquals("That song is no longer lined up", run("keepSuggestion", "index" to 5))
-        assertEquals(listOf(offered[1]), queue.suggestions)
+        assertEquals(offered.take(2), queue.suggestions)
 
         assertNull(run("playSuggestion", "key" to offered[1].queueKey, "index" to 0))
         waitFor { queue.current == offered[1] }
         // The queue now ends on a song core would look for more after; autoplay goes off before it asks.
         state.setAutoplay(false)
-        assertEquals(queued + offered[0] + offered[1], queue.tracks)
+        assertEquals(queued + offered.take(2), queue.tracks)
         assertTrue(queue.suggestions.isEmpty())
     }
 
