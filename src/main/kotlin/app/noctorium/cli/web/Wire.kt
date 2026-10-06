@@ -457,5 +457,7 @@ fun likeKeyOf(provider: ProviderType, id: String) = when (provider) {
     ProviderType.YOUTUBE_MUSIC, ProviderType.YOUTUBE_VIDEO -> "yt:$id"
     ProviderType.SOUNDCLOUD -> "sc:$id"
     ProviderType.SPOTIFY -> "spotify:$id"
+    ProviderType.BANDCAMP -> "bc:$id"
+    ProviderType.VK -> "vk:$id"
     ProviderType.LOCAL -> "local:$id"
 }

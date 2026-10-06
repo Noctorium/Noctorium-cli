@@ -29,6 +29,8 @@ data class Palette(
     val youTube: Rgb get() = 0xFF4E45
     val soundCloud: Rgb get() = 0xFF7A1A
     val spotify: Rgb get() = 0x1ED760
+    val bandcamp: Rgb get() = if (light) 0x408294 else 0x629AA9
+    val vk: Rgb get() = if (light) 0x0062D1 else 0x4C9BFF
     val good: Rgb get() = if (light) 0x1E8E3E else 0x5FE3B0
     val warn: Rgb get() = if (light) 0xB26A00 else 0xFFC266
     val bad: Rgb get() = if (light) 0xC62828 else 0xFF6B6B

@@ -102,6 +102,8 @@ fun ProviderType.badge(): String = when (this) {
     ProviderType.YOUTUBE_VIDEO -> "YV"
     ProviderType.SOUNDCLOUD -> "SC"
     ProviderType.SPOTIFY -> "SP"
+    ProviderType.BANDCAMP -> "BC"
+    ProviderType.VK -> "VK"
     ProviderType.LOCAL -> "··"
 }
 
@@ -109,6 +111,8 @@ fun Palette.badgeColour(provider: ProviderType): Rgb = when (provider) {
     ProviderType.YOUTUBE_MUSIC, ProviderType.YOUTUBE_VIDEO -> youTube
     ProviderType.SOUNDCLOUD -> soundCloud
     ProviderType.SPOTIFY -> spotify
+    ProviderType.BANDCAMP -> bandcamp
+    ProviderType.VK -> vk
     ProviderType.LOCAL -> subtext
 }
 

@@ -413,6 +413,8 @@ class Out(private val colour: Boolean = System.console() != null && System.geten
         ProviderType.YOUTUBE_MUSIC -> wrap("1;38;2;255;78;69", "YT")
         ProviderType.YOUTUBE_VIDEO -> wrap("1;38;2;255;78;69", "YV")
         ProviderType.SPOTIFY -> wrap("1;38;2;30;215;96", "SP")
+        ProviderType.BANDCAMP -> wrap("1;38;2;98;154;169", "BC")
+        ProviderType.VK -> wrap("1;38;2;0;119;255", "VK")
         ProviderType.LOCAL -> "··"
     }
 }
