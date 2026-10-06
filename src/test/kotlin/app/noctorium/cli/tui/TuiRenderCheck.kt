@@ -182,6 +182,11 @@ class TuiRenderCheck {
                 tui.preferences.playerBar = TuiPlayerBar.TASKBAR
                 write(folder, "$name-taskbar", tui)
                 write(folder, "$name-taskbar-narrow", tui, 84, 24)
+                // With the clock switched off, the tray is only as wide as the volume.
+                state.setTaskbarClock(false)
+                write(folder, "$name-taskbar-no-clock", tui)
+                write(folder, "$name-taskbar-no-clock-narrow", tui, 84, 24)
+                state.setTaskbarClock(true)
                 tui.preferences.playerBar = TuiPlayerBar.COMPACT
                 write(folder, "$name-compact", tui)
                 tui.preferences.playerBar = TuiPlayerBar.FULL
@@ -189,6 +194,7 @@ class TuiRenderCheck {
                 write(folder, "$name-home-narrow", tui, 90, 30)
             }
         } finally {
+            state.setTaskbarClock(true)
             tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
             tui.preferences.playerBar = TuiPlayerBar.FULL
             state.setTheme(ThemePreset.NOCTORIUM_NIGHT)

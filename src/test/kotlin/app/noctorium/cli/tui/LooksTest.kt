@@ -16,6 +16,10 @@ import kotlinx.coroutines.flow.update
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -225,6 +229,43 @@ class LooksTest {
         assertEquals(0xECE9D8, page(ThemePreset.WINDOWS_XP))
         assertEquals(DEFAULT, page(ThemePreset.NOCTORIUM_NIGHT))
         assertEquals(DEFAULT, page(ThemePreset.CATPPUCCIN_LATTE))
+    }
+
+    @Test
+    fun `the taskbar's clock is shown or hidden from Settings, which offers it wherever there may be a taskbar`() {
+        playing()
+        tui.page = Page.QUEUE
+        fun row() = Settings.rows(tui).filterIsInstance<Row.Action>().firstOrNull { it.label == "Show the clock" }
+        assertNull(row(), "The full bar in an ordinary theme has no taskbar, and no clock to show")
+        tui.preferences.playerBar = TuiPlayerBar.TASKBAR
+        assertEquals("Shown", row()?.value)
+        // The clock is read either side of the frame, in case the minute turns while it is drawn.
+        val before = PlayerBar.clock()
+        val shown = lines(render()).last()
+        val after = PlayerBar.clock()
+        assertTrue(shown.endsWith(before) || shown.endsWith(after), shown)
+
+        assertNotNull(row()?.step).invoke(1)
+        waitFor { !state.settings.value.preferences.taskbarClock }
+        assertEquals("Hidden", row()?.value)
+        val hidden = lines(render()).last()
+        assertFalse(hidden.endsWith(before) || hidden.endsWith(after), hidden)
+        // The tray is only the volume now, and the seek bar has the room it gave up.
+        assertTrue(hidden.indexOf("4:43") > shown.indexOf("4:43"), "$shown\n$hidden")
+
+        // A sleep timer's moon stays without the clock, and still opens the timer.
+        state.startSleepTimer(30)
+        waitFor { state.sleepTimer.value != null }
+        click(render(), "☾")
+        assertEquals("Sleep timer", assertIs<Overlay.Picker>(tui.overlays.last()).title)
+        tui.overlays.clear()
+        state.cancelSleepTimer()
+
+        // The Windows themes offer it whichever bar is chosen.
+        tui.preferences.playerBar = TuiPlayerBar.FULL
+        assertNull(row())
+        theme(ThemePreset.WINDOWS_XP)
+        assertEquals("Hidden", row()?.value)
     }
 
     @Test

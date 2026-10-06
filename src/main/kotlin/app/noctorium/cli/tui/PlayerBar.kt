@@ -162,7 +162,8 @@ object PlayerBar {
      * A desktop's taskbar, as the ones of the late nineties had it: a start button, which opens Now playing; the
      * controls where the small launch buttons sat; the song as the button of the window in use -- pressed in
      * while it plays, and pressed again to pause it, as a window's button put it away; the seek bar; and the
-     * tray at the far end, with the volume and the clock, which opens the sleep timer. Plain in most themes;
+     * tray at the far end, with the volume and the clock, which opens the sleep timer and can be switched off
+     * in Settings, as Windows let it be. Plain in most themes;
      * 98 draws it as its grey bar of raised buttons and XP as Luna's blue one with its green start button.
      */
     private fun taskbar(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int) {
@@ -195,9 +196,15 @@ object PlayerBar {
             else -> playButton(tui, canvas, left, row, p, onLuna = xp)
         } + 2
 
-        // The tray, from the right: the volume, then the clock, with a cell either end and two for the moon.
-        val clock = clock()
-        val trayW = VOLUME_BARS + Canvas.displayWidth(clock) + 5
+        // The tray, from the right: the volume with a cell either side, then the sleep timer's moon and the clock
+        // after it -- the clock unless it is switched off, when the tray is only as wide as what is left in it.
+        val clock = clock().takeIf { state.settings.value.preferences.taskbarClock }
+        val sleeping = state.sleepTimer.value != null
+        val trayW = VOLUME_BARS + 2 + when {
+            clock != null -> Canvas.displayWidth(clock) + 3
+            sleeping -> 2
+            else -> 0
+        }
         val trayX = x + w - trayW
         val trayBg = when {
             xp -> Xp.TRAY
@@ -220,7 +227,7 @@ object PlayerBar {
             }
         }
         volume(tui, canvas, trayX + 1, row, trayBg, p.accent, if (theme.skinned) p.line else p.faint)
-        tray(tui, canvas, trayX + VOLUME_BARS + 4, row, clock, p, trayBg)
+        tray(tui, canvas, trayX + VOLUME_BARS + 2, row, clock, p, trayBg)
 
         // The song's button, then the seek bar across what is left between it and the tray -- each left out
         // rather than drawn over the tray when a narrow terminal has no room for it.
@@ -309,12 +316,20 @@ object PlayerBar {
         return w
     }
 
-    /** The clock in the tray, with the sleep timer's moon in front of it while one is set; clicking it sets one. */
-    private fun tray(tui: Tui, canvas: Canvas, x: Int, y: Int, clock: String, p: Palette, bg: Rgb) {
+    /**
+     * The end of the tray from [x]: the sleep timer's moon while one is set, and two cells on the [clock], unless
+     * it is switched off. Clicking either sets a sleep timer, or changes the one set.
+     */
+    private fun tray(tui: Tui, canvas: Canvas, x: Int, y: Int, clock: String?, p: Palette, bg: Rgb) {
         val sleeping = tui.state.sleepTimer.value != null
-        if (sleeping) canvas.set(x - 2, y, "☾", p.accent, bg, BOLD)
-        canvas.write(x, y, clock, if (p.skinned) p.text else p.subtext, bg)
-        tui.clickTargets += Tui.ClickTarget(x - 2, y, Canvas.displayWidth(clock) + 2, 1) { tui.overlays.addLast(Overlays.sleepTimer(tui)) }
+        if (sleeping) canvas.set(x, y, "☾", p.accent, bg, BOLD)
+        clock?.let { canvas.write(x + 2, y, it, if (p.skinned) p.text else p.subtext, bg) }
+        val w = when {
+            clock != null -> Canvas.displayWidth(clock) + 2
+            sleeping -> 1
+            else -> return
+        }
+        tui.clickTargets += Tui.ClickTarget(x, y, w, 1) { tui.overlays.addLast(Overlays.sleepTimer(tui)) }
     }
 
     /** The time of day, as this computer's own clock writes it. */

@@ -301,6 +301,8 @@ data class WSettings(
     val progressBarStyle: String,
     /** Every seek bar there is, by name, with what each is called and looks like, so the page lists them all. */
     val progressBarStyles: List<WChoice> = emptyList(),
+    /** Whether a taskbar shows the clock in its tray: the Taskbar layout's, and the Windows themes'. */
+    val taskbarClock: Boolean = true,
     val timeDisplay: String,
     val skipNonMusic: Boolean,
     val youtubeHistory: Boolean,
@@ -495,6 +497,7 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
                 accents = app.noctorium.settings.AccentPreset.entries.map { it.name },
                 progressBarStyle = p.progressBarStyle.name,
                 progressBarStyles = ProgressBarStyle.entries.map { WChoice(it.name, it.displayName, it.description) },
+                taskbarClock = p.taskbarClock,
                 timeDisplay = p.timeDisplay.name,
                 skipNonMusic = p.skipNonMusic,
                 youtubeHistory = p.youtubeHistory,

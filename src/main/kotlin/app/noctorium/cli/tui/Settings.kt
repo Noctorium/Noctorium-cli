@@ -18,7 +18,9 @@ import app.noctorium.settings.ProgressBarStyle
 import app.noctorium.settings.ScrobbleConnectionStatus
 import app.noctorium.settings.DEFAULT_HYBRID_SEARCH
 import app.noctorium.settings.ThemePreset
+import app.noctorium.settings.ThemeSkin
 import app.noctorium.settings.TimeDisplay
+import app.noctorium.settings.themeSkin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -228,6 +230,8 @@ object Settings {
 
         add(Row.Header("Look"))
         val themes = ThemePreset.entries.filter { it.colours != null }
+        // A Windows theme is in force: read from the settings, which the palette only catches up with at the next frame.
+        val windows = preferences.themeSkin != ThemeSkin.STANDARD
         add(
             Row.Action("Theme", value = themeName(preferences.theme), step = { by -> tui.cycleTheme(by) }, run = {
                 tui.overlays.addLast(Overlay.Picker("Theme", themes.map { theme -> themeName(theme) to { state.setTheme(theme) } }))
@@ -246,6 +250,18 @@ object Settings {
                 tui.preferences.save()
             }),
         )
+        // The taskbar's clock, offered only where a taskbar may be showing it: the Taskbar layout's, and the
+        // Windows themes'. The setting is core's, so the web page this player serves follows it too.
+        if (bar == TuiPlayerBar.TASKBAR || windows) {
+            add(
+                Row.Action(
+                    "Show the clock",
+                    value = if (preferences.taskbarClock) "Shown" else "Hidden",
+                    detail = "The time at the end of the taskbar's tray, which also sets the sleep timer",
+                    step = { state.setTaskbarClock(!preferences.taskbarClock) },
+                ),
+            )
+        }
         val nowPlaying = tui.preferences.nowPlaying
         add(
             Row.Action("Now playing", value = nowPlaying.displayName, detail = nowPlaying.description, step = { by ->
@@ -257,7 +273,7 @@ object Settings {
         // The Windows themes are slabs of their own grey or beige, and keep it whichever this says: see Palette.
         val background = when {
             !tui.preferences.terminalBackground -> "The theme's"
-            tui.palette.skinned -> "The terminal's own, except in the Windows themes"
+            windows -> "The terminal's own, except in the Windows themes"
             else -> "The terminal's own"
         }
         add(

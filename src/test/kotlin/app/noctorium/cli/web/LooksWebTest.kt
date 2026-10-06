@@ -11,6 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -21,8 +22,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 /**
- * How the player looks, as the web page is told it: every seek bar by name with what it is called, and each
- * theme's skin, so the page can draw the Windows themes as themselves. The services are stand-ins.
+ * How the player looks, as the web page is told it: every seek bar by name with what it is called, each
+ * theme's skin, so the page can draw the Windows themes as themselves, and whether a taskbar shows its clock.
+ * The services are stand-ins.
  */
 class LooksWebTest {
     private val parts = CliParts()
@@ -56,6 +58,19 @@ class LooksWebTest {
         assertNull(run("seekBar", "LUNA"))
         waitFor { state.settings.value.preferences.progressBarStyle == ProgressBarStyle.LUNA }
         assertEquals("LUNA", settings().string("progressBarStyle"))
+    }
+
+    @Test
+    fun `the page is told whether a taskbar shows its clock, and switches it`() {
+        fun clock() = settings().getValue("taskbarClock").jsonPrimitive.boolean
+        assertEquals(true, clock())
+        assertNull(commands.run(buildJsonObject { put("type", JsonPrimitive("taskbarClock")); put("on", JsonPrimitive(false)) }))
+        waitFor { !state.settings.value.preferences.taskbarClock }
+        assertEquals(false, clock())
+        assertNull(commands.run(buildJsonObject { put("type", JsonPrimitive("taskbarClock")); put("on", JsonPrimitive(true)) }))
+        waitFor { state.settings.value.preferences.taskbarClock }
+        assertEquals(true, clock())
+        assertEquals("On or off?", commands.run(buildJsonObject { put("type", JsonPrimitive("taskbarClock")) }))
     }
 
     @Test

@@ -208,6 +208,7 @@ class WebCommands(
             "theme" -> state.setTheme(ThemePreset.valueOf(command.string("name") ?: return "No theme"))
             "accent" -> state.setAccent(AccentPreset.valueOf(command.string("name") ?: return "No accent"))
             "seekBar" -> state.setProgressBarStyle(ProgressBarStyle.valueOf(command.string("name") ?: return "No style"))
+            "taskbarClock" -> state.setTaskbarClock(command.bool("on") ?: return "On or off?")
             "timeDisplay" -> state.setTimeDisplay(TimeDisplay.valueOf(command.string("name") ?: return "No choice"))
             "skipNonMusic" -> state.setSkipNonMusic(command.bool("on") ?: return "On or off?")
             "youtubeHistory" -> state.setYouTubeHistory(command.bool("on") ?: return "On or off?")

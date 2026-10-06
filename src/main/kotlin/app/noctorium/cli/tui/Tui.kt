@@ -145,8 +145,10 @@ class Tui(
                 val now = System.currentTimeMillis()
                 // The seek bar and the lyrics move on their own while playing; a few frames a second is plenty.
                 if (state.playback.value.status == PlaybackStatus.PLAYING && now - lastFrame > 250) dirty.set(true)
-                // The taskbar's clock moves on with the minute, playing or not.
-                if (preferences.playerBar == TuiPlayerBar.TASKBAR && now / 60_000 != lastFrame / 60_000) dirty.set(true)
+                // The taskbar's clock moves on with the minute, playing or not, while it is shown.
+                if (preferences.playerBar == TuiPlayerBar.TASKBAR && state.settings.value.preferences.taskbarClock && now / 60_000 != lastFrame / 60_000) {
+                    dirty.set(true)
+                }
                 if (dirty.getAndSet(false)) {
                     render()
                     lastFrame = now
