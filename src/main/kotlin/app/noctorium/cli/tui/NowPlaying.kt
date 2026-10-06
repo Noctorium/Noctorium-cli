@@ -3,7 +3,6 @@ package app.noctorium.cli.tui
 import app.noctorium.domain.ProviderType
 import app.noctorium.domain.Track
 import app.noctorium.domain.pageUrl
-import app.noctorium.lyrics.LyricsResult
 import app.noctorium.playback.PlaybackStatus
 
 /**
@@ -354,7 +353,7 @@ object NowPlaying {
     private fun noLyrics(tui: Tui): String {
         val lyrics = tui.state.lyrics.value
         val outcome = lyrics.outcomes.firstOrNull { it.provider == lyrics.selectedProvider }
-        val result: LyricsResult? = outcome?.result
+        val result = outcome?.result
         return when {
             lyrics.loading -> "Looking in ${lyrics.outcomes.size.takeIf { it > 0 } ?: "eight"} places…"
             result?.sourceUrl != null -> "${result.provider.displayName} only links to its lyrics: ${tui.key(KeyAction.OPEN_PAGE)} opens them."

@@ -33,22 +33,16 @@ internal object Xp {
     val GREY_TEXT = cell(WindowsXpColours.GREY_TEXT)
     val SELECTION = cell(WindowsXpColours.SELECTION)
     val SELECTION_TEXT = cell(WindowsXpColours.SELECTION_TEXT)
-    val TITLE_TOP = cell(WindowsXpColours.TITLE_TOP)
     val TITLE = cell(WindowsXpColours.TITLE)
     val TITLE_LOW = cell(WindowsXpColours.TITLE_LOW)
-    val TITLE_FOOT = cell(WindowsXpColours.TITLE_FOOT)
     val TITLE_TEXT = cell(WindowsXpColours.TITLE_TEXT)
     val FRAME = cell(WindowsXpColours.FRAME)
     val CLOSE = cell(WindowsXpColours.CLOSE)
     val BUTTON_EDGE = cell(WindowsXpColours.BUTTON_EDGE)
     val BUTTON_FOOT = cell(WindowsXpColours.BUTTON_FOOT)
-    val HOT = cell(WindowsXpColours.HOT)
     val FOCUS = cell(WindowsXpColours.FOCUS)
     val FIELD_EDGE = cell(WindowsXpColours.FIELD_EDGE)
-    val GROUP_EDGE = cell(WindowsXpColours.GROUP_EDGE)
-    val GROUP_TITLE = cell(WindowsXpColours.GROUP_TITLE)
     val TAB_EDGE = cell(WindowsXpColours.TAB_EDGE)
-    val TAB_CHOSEN = cell(WindowsXpColours.TAB_CHOSEN)
     val PROGRESS_LIGHT = cell(WindowsXpColours.PROGRESS_LIGHT)
     val PROGRESS = cell(WindowsXpColours.PROGRESS)
     val SCROLL_THUMB = cell(WindowsXpColours.SCROLL_THUMB)
@@ -109,8 +103,8 @@ object Skin {
     /** The colours a title bar runs between, from its left end to its right. */
     private fun titleColours(p: Palette): Pair<Rgb, Rgb> = if (xp(p)) Xp.TITLE to Xp.TITLE_LOW else W98.TITLE to W98.TITLE_END
 
-    /** The colour of a title bar [at] that far along it, from 0 to 1. */
-    fun titleAt(p: Palette, at: Float): Rgb = titleColours(p).let { (from, to) -> mix(from, to, at) }
+    /** The pale yellow of a tooltip, which both drew with a thin black edge. */
+    fun tooltip(p: Palette): Rgb = if (xp(p)) Xp.TOOLTIP else W98.TOOLTIP
 
     /**
      * A line of [w] cells from [x], each a step of the way from [from] to [to]: the title bars of both, which
@@ -235,23 +229,21 @@ object Skin {
         roomBelow: Boolean = true,
     ): Int {
         val w = Canvas.displayWidth(label) + 4
-        val face: Rgb
-        val lit: Rgb
-        val shaded: Rgb
-        if (xp(p)) {
-            face = mix(Xp.WINDOW, Xp.BUTTON_FOOT, .3f)
-            lit = if (default) Xp.FOCUS else Xp.BUTTON_EDGE
-            shaded = Xp.BUTTON_EDGE
-        } else {
-            face = W98.FACE
-            lit = W98.HIGHLIGHT
-            shaded = if (default) W98.DARK_SHADOW else W98.SHADOW
+        val xp = xp(p)
+        val face = if (xp) mix(Xp.WINDOW, Xp.BUTTON_FOOT, .3f) else W98.FACE
+        // 98 lit a slab along its top and left and shaded it along its foot and right, the default button more
+        // deeply; XP edged its button all round in dark blue, and the default one's foot in the blue of focus.
+        val lit = if (xp) Xp.BUTTON_EDGE else W98.HIGHLIGHT
+        val shaded = when {
+            xp -> Xp.BUTTON_EDGE
+            default -> W98.DARK_SHADOW
+            else -> W98.SHADOW
         }
         canvas.fill(x, y, w, 1, face)
-        canvas.set(x, y, LEFT, if (xp(p)) shaded else lit, face)
+        canvas.set(x, y, LEFT, lit, face)
         canvas.set(x + w - 1, y, RIGHT, shaded, face)
-        if (roomAbove) for (c in x until x + w) canvas.set(c, y - 1, FOOT, if (xp(p)) shaded else lit)
-        if (roomBelow) for (c in x until x + w) canvas.set(c, y + 1, TOP, if (xp(p) && default) lit else shaded)
+        if (roomAbove) for (c in x until x + w) canvas.set(c, y - 1, FOOT, lit)
+        if (roomBelow) for (c in x until x + w) canvas.set(c, y + 1, TOP, if (xp && default) Xp.FOCUS else shaded)
         val style = if (default) BOLD else 0
         canvas.write(x + 2, y, label, text(p), face, style)
         if (mnemonic != null && mnemonic in label.indices) canvas.set(x + 2 + mnemonic, y, label[mnemonic].toString(), text(p), face, style or UNDERLINE)

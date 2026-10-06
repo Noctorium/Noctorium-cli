@@ -477,10 +477,11 @@ class Tui(
             val colour = toneColour(p, toast.tone).takeIf { toast.tone != Row.Tone.NORMAL } ?: p.text
             if (p.skinned) {
                 // A tooltip, as both Windows drew them: pale yellow, edged in black.
-                canvas.fill(x, y, tw, 1, W98.TOOLTIP)
-                canvas.set(x, y, Skin.LEFT, W98.TEXT, W98.TOOLTIP)
-                canvas.set(x + tw - 1, y, Skin.RIGHT, W98.TEXT, W98.TOOLTIP)
-                canvas.write(x + 1, y, text, colour, W98.TOOLTIP, max = tw - 2)
+                val tooltip = Skin.tooltip(p)
+                canvas.fill(x, y, tw, 1, tooltip)
+                canvas.set(x, y, Skin.LEFT, Skin.text(p), tooltip)
+                canvas.set(x + tw - 1, y, Skin.RIGHT, Skin.text(p), tooltip)
+                canvas.write(x + 1, y, text, colour, tooltip, max = tw - 2)
             } else {
                 canvas.fill(x, y, tw, 1, p.card)
                 canvas.set(x, y, "▌", if (toast.tone == Row.Tone.NORMAL) p.accent else colour, p.card)
