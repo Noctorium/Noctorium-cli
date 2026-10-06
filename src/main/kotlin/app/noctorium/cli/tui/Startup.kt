@@ -9,7 +9,7 @@ object Startup {
     suspend fun playFirst(tui: Tui, query: String) {
         val state = tui.state
         val text = query.trim()
-        if (text.startsWith("http://") || text.startsWith("https://") || text.startsWith("music.youtube.com") || text.startsWith("soundcloud.com")) {
+        if (Pages.looksLikeLink(text)) {
             state.openLink(text)
             tui.toast("Opening the link…")
             return

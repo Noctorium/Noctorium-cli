@@ -1,5 +1,6 @@
 package app.noctorium.cli.tui
 
+import app.noctorium.bandcamp.BandcampGenre
 import app.noctorium.cli.CliHome
 import app.noctorium.cli.DesktopSignIn
 import app.noctorium.cli.cliVersion
@@ -82,6 +83,31 @@ object Settings {
                     if (spotify.connected) tui.overlays.addLast(Overlay.Confirm("Disconnect Spotify?", "Your Spotify playlists leave the library.") { state.disconnectSpotify() })
                     else state.connectSpotify()
                 },
+            ),
+        )
+        // Bandcamp is a name rather than a sign-in: it shows a fan's collection and wishlist to anybody. The name
+        // is what is kept; the fan's own name for themselves is known once Bandcamp has confirmed it, here.
+        val bandcamp = settings.bandcamp
+        val fan = preferences.bandcampUsername
+        add(
+            Row.Action(
+                "Bandcamp collection",
+                value = when {
+                    bandcamp.checking -> "Checking with Bandcamp…"
+                    fan.isBlank() -> "Not set"
+                    bandcamp.fanName.isNotBlank() && !bandcamp.fanName.equals(fan, ignoreCase = true) -> "${bandcamp.fanName} · bandcamp.com/$fan"
+                    else -> "bandcamp.com/$fan"
+                },
+                tone = if (fan.isNotBlank() && !bandcamp.checking) Row.Tone.GOOD else Row.Tone.QUIET,
+                run = { tui.overlays.addLast(bandcampMenu(tui)) },
+            ),
+        )
+        bandcamp.message?.let { add(Row.Note(it, if (it == BANDCAMP_REMOVED) Row.Tone.QUIET else Row.Tone.WARN)) }
+        add(
+            Row.Action(
+                "Bandcamp on Home",
+                value = preferences.bandcampGenres.joinToString { it.displayName }.ifBlank { "Best-sellers and new releases only" },
+                run = { tui.overlays.addLast(bandcampGenres(tui)) },
             ),
         )
         val scrobbling = settings.scrobbling
@@ -371,6 +397,51 @@ object Settings {
         }
         return Overlay.Picker("SoundCloud", options)
     }
+
+    private fun bandcampMenu(tui: Tui): Overlay {
+        val state = tui.state
+        val current = state.settings.value.preferences.bandcampUsername
+        val desktop = DesktopSignIn.bandcampName()?.takeIf { !it.equals(current, ignoreCase = true) }
+        val options = buildList<Pair<String, () -> Unit>> {
+            desktop?.let { name -> add("Use bandcamp.com/$name, from Noctorium on this computer" to { state.setBandcampUsername(name) }) }
+            add((if (current.isBlank()) "Your name, from bandcamp.com/<name>…" else "Change the name…") to {
+                tui.overlays.addLast(
+                    Overlay.Prompt("Bandcamp", "The name at the end of your Bandcamp address, bandcamp.com/<name>, or the address.", current) {
+                        if (it.isNotBlank()) state.setBandcampUsername(it)
+                    },
+                )
+            })
+            if (current.isNotBlank()) add("Take the collection out of the library" to {
+                tui.overlays.addLast(
+                    Overlay.Confirm("Take your Bandcamp collection out of the library?", "Nothing changes on Bandcamp; the name is forgotten here.") {
+                        state.setBandcampUsername("")
+                    },
+                )
+            })
+        }
+        return Overlay.Picker("Bandcamp", options, "Not a sign-in: a collection is public.")
+    }
+
+    /** Which genres Home has a row of Bandcamp's best-sellers for, ticked in a list of all of them. */
+    private fun bandcampGenres(tui: Tui): Overlay {
+        val state = tui.state
+        val genres = BandcampGenre.entries
+        return Overlay.Checklist(
+            "Bandcamp on Home",
+            genres.map { it.displayName },
+            state.settings.value.preferences.bandcampGenres.map(genres::indexOf),
+            "A row of best-sellers for each · Space ticks · Esc when done",
+        ) { chosen ->
+            val picked = chosen.map { genres[it] }
+            if (picked != state.settings.value.preferences.bandcampGenres) state.setBandcampGenres(picked)
+        }
+    }
+
+    /**
+     * Core's word for a collection taken out on purpose, the one Bandcamp message that is not a problem. Only its
+     * colour depends on this.
+     */
+    private const val BANDCAMP_REMOVED = "Bandcamp collection removed."
 
     /** "Catppuccin Mocha", "Noctorium Night", and "Nord" rather than "Nord Nord". */
     fun themeName(theme: ThemePreset): String = when {

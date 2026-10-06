@@ -1,5 +1,6 @@
 package app.noctorium.cli.web
 
+import app.noctorium.bandcamp.BandcampGenre
 import app.noctorium.cli.DesktopSignIn
 import app.noctorium.cli.cliVersion
 import app.noctorium.core.AppState
@@ -177,6 +178,29 @@ data class WAccount(val status: String, val detail: String? = null, val hint: St
 data class WService(val status: String, val username: String? = null, val message: String? = null)
 
 @Serializable
+data class WGenre(val name: String, val title: String)
+
+/**
+ * Bandcamp, which is a name rather than a sign-in: the fan whose collection the library shows, how the last
+ * look for them went, and the genres Home has a row for.
+ */
+@Serializable
+data class WBandcamp(
+    /** The name in bandcamp.com/<name>; blank for none. */
+    val username: String,
+    /** What the fan calls themselves, once Bandcamp has confirmed the name since Noctorium started. */
+    val fanName: String,
+    val checking: Boolean,
+    val message: String? = null,
+    /** The genres Home has a row for, by name, in their order. */
+    val genres: List<String>,
+    /** Every genre there could be a row for. */
+    val allGenres: List<WGenre>,
+    /** The name Noctorium on this computer shows, to be offered here too; null when it shows none. */
+    val desktop: String? = null,
+)
+
+@Serializable
 data class WTheme(
     val name: String,
     val title: String,
@@ -212,6 +236,7 @@ data class WSettings(
     val spotifyConnected: Boolean,
     val spotifyConnecting: Boolean,
     val spotifyAccount: String,
+    val bandcamp: WBandcamp,
     val lastfm: WService,
     val listenbrainz: WService,
     val scrobbles: Int,
@@ -290,7 +315,10 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
         val ui = state.ui.value
         return wireJson.encodeToJsonElement(
             WHome(
-                ui.homeSections.map { s -> WSection(s.id, s.title, s.subtitle, s.provider, s.tracks.map { it.wire() }, s.playlists.map { it.wire() }) },
+                // Only the rows of the service chosen with the page's chips, as the hosted player sends them too:
+                // core keeps the choice, and each Noctorium leaves the other rows out as it shows Home.
+                ui.homeSections.filter { ui.providerFilter.matches(it.provider) }
+                    .map { s -> WSection(s.id, s.title, s.subtitle, s.provider, s.tracks.map { it.wire() }, s.playlists.map { it.wire() }) },
                 ui.homeLoading,
                 ui.recentTracks.take(12).map { it.wire() },
                 ui.pinnedTracks.map { it.wire() },
@@ -375,6 +403,15 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
                 spotifyConnected = s.spotify.connected,
                 spotifyConnecting = s.spotify.connecting,
                 spotifyAccount = s.spotify.accountName,
+                bandcamp = WBandcamp(
+                    username = p.bandcampUsername,
+                    fanName = s.bandcamp.fanName,
+                    checking = s.bandcamp.checking,
+                    message = s.bandcamp.message,
+                    genres = p.bandcampGenres.map { it.name },
+                    allGenres = BandcampGenre.entries.map { WGenre(it.name, it.displayName) },
+                    desktop = desktopBandcamp,
+                ),
                 lastfm = WService(s.scrobbling.lastFm.status.name.lowercase(), s.scrobbling.lastFm.username, s.scrobbling.lastFm.message),
                 listenbrainz = WService(s.scrobbling.listenBrainz.status.name.lowercase(), s.scrobbling.listenBrainz.username, s.scrobbling.listenBrainz.message),
                 scrobbles = s.scrobbling.scrobblesThisSession,
@@ -387,12 +424,18 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
     }
 
     /** Asked once a minute at most: it reads the desktop's files. */
-    private val desktopYouTube: Boolean get() = cached("yt") { DesktopSignIn.youTubeAvailable() }
-    private val desktopSoundCloud: Boolean get() = cached("sc") { DesktopSignIn.soundCloudAvailable() }
-    private val cache = mutableMapOf<String, Pair<Long, Boolean>>()
-    private fun cached(key: String, read: () -> Boolean): Boolean = synchronized(cache) {
-        val now = System.currentTimeMillis()
-        cache[key]?.takeIf { now - it.first < 60_000 }?.second ?: runCatching(read).getOrDefault(false).also { cache[key] = now to it }
+    private val desktopYouTube: Boolean get() = cached("yt", false) { DesktopSignIn.youTubeAvailable() }
+    private val desktopSoundCloud: Boolean get() = cached("sc", false) { DesktopSignIn.soundCloudAvailable() }
+    private val desktopBandcamp: String? get() = cached("bc", null) { DesktopSignIn.bandcampName() }
+    private val cache = mutableMapOf<String, Pair<Long, Any?>>()
+
+    @Suppress("UNCHECKED_CAST")
+    private fun <T> cached(key: String, otherwise: T, read: () -> T): T {
+        synchronized(cache) {
+            val now = System.currentTimeMillis()
+            cache[key]?.takeIf { now - it.first < 60_000 }?.let { return it.second as T }
+            return runCatching(read).getOrDefault(otherwise).also { cache[key] = now to it }
+        }
     }
 
     fun downloads(): JsonElement {

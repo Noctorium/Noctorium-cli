@@ -258,6 +258,7 @@ class Tui(
             add("YT" to (settings.youtubeAccount.status == app.noctorium.settings.AccountConnectionStatus.CONNECTED))
             add("SC" to (settings.soundCloudAccount.status == app.noctorium.settings.AccountConnectionStatus.CONNECTED))
             if (settings.spotify.connected) add("SP" to true)
+            if (settings.preferences.bandcampUsername.isNotBlank()) add("BC" to true)
         }
         var right = w - 1
         web?.address?.let {
@@ -434,7 +435,11 @@ class Tui(
     internal fun like(track: Track) {
         val likes = state.likes.value
         if (!likes.supports(track)) {
-            toast("Sign in to ${track.provider.displayName} in Settings to like its tracks", Row.Tone.WARN)
+            toast(
+                if (track.provider.keepsLikes) "Sign in to ${track.provider.displayName} in Settings to like its tracks"
+                else "${track.provider.displayName} tracks cannot be liked from Noctorium",
+                Row.Tone.WARN,
+            )
             return
         }
         val was = likes.isLiked(track)

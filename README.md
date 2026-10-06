@@ -4,7 +4,7 @@
 
 # Noctorium CLI
 
-**YouTube Music and SoundCloud, in a terminal — and in every browser in the house.**
+**YouTube Music, SoundCloud and Bandcamp, in a terminal — and in every browser in the house.**
 
 </div>
 
@@ -22,8 +22,8 @@ noctorium web                   the web player, for any browser on your network
 
 ## What it does
 
-- **Both services in one place.** Home, search and your library from YouTube Music and SoundCloud,
-  your Spotify playlists played from either, one queue for all of it.
+- **Every service in one place.** Home, search and your library from YouTube Music, SoundCloud and
+  Bandcamp, your Spotify playlists played from YouTube Music or SoundCloud, one queue for all of it.
 - **Your real accounts.** Likes go to the service; playlists are made, renamed, reordered, made public or
   private and deleted there.
 - **Synced lyrics** from eight sources, lit up line by line as they are sung, with the source switched
@@ -86,12 +86,17 @@ signed in, and never passes through anything but your own computer:
 All three are in the player too, under Settings (`8`). Spotify and Last.fm are approved in a browser as
 they are on the desktop.
 
+Bandcamp needs no sign-in at all, since a fan's collection is public: `noctorium login bandcamp <name>`,
+with the name from your `bandcamp.com/<name>` address, puts your collection and wishlist in the library, and
+`noctorium logout bandcamp` takes them out again. Its songs are streamed for listening; to keep one, buy it
+on its Bandcamp page (`o` opens it).
+
 ## The keys
 
 | | |
 | --- | --- |
 | `1`–`8`, `Tab` | Home, Search, Library, Queue, Now playing, Downloads, Devices, Settings |
-| `/` | Search both services (or paste a link) |
+| `/` | Search every service (or paste a link) |
 | `↑` `↓` `Enter` | Choose, and play from there |
 | `Space` `n` `p` | Play or pause, next, previous |
 | `←` `→` | Back or on five seconds (thirty with Shift) |
@@ -142,4 +147,4 @@ cd Noctorium-cli
 ---
 
 <sub>Free software under the GPL-3.0. Noctorium is an independent client and not affiliated with Google,
-YouTube, SoundCloud, Spotify, Last.fm, ListenBrainz or Discord.</sub>
+YouTube, SoundCloud, Bandcamp, Spotify, Last.fm, ListenBrainz or Discord.</sub>

@@ -1,5 +1,6 @@
 package app.noctorium.cli.tui
 
+import app.noctorium.bandcamp.BandcampMusicProvider
 import app.noctorium.core.AppState
 import app.noctorium.domain.Playlist
 import app.noctorium.domain.PlaybackOrigin
@@ -107,6 +108,13 @@ fun ProviderType.badge(): String = when (this) {
     ProviderType.LOCAL -> "··"
 }
 
+/**
+ * Whether a like given to a track from here goes to the listener's account: YouTube's and SoundCloud's do.
+ * Spotify's are read and never written, and Bandcamp and VK have none Noctorium keeps.
+ */
+val ProviderType.keepsLikes: Boolean
+    get() = this == ProviderType.YOUTUBE_MUSIC || this == ProviderType.YOUTUBE_VIDEO || this == ProviderType.SOUNDCLOUD
+
 fun Palette.badgeColour(provider: ProviderType): Rgb = when (provider) {
     ProviderType.YOUTUBE_MUSIC, ProviderType.YOUTUBE_VIDEO -> youTube
     ProviderType.SOUNDCLOUD -> soundCloud
@@ -170,6 +178,9 @@ class ListView(private val palette: () -> Palette, private val state: AppState) 
                     canvas.write(x + 3, ry, pl.provider.badge(), p.badgeColour(pl.provider), background, BOLD)
                     val name = canvas.write(x + 6, ry, pl.title, p.text, background, BOLD, max = (w * 6 / 10).coerceAtLeast(10))
                     val detail = listOfNotNull(
+                        // A Bandcamp artist opens as a playlist of everything they put out, and says what it is;
+                        // what Bandcamp gives as its owner is then where they are.
+                        "Artist".takeIf { BandcampMusicProvider.isArtist(pl) },
                         pl.ownerName?.takeIf(String::isNotBlank),
                         (pl.trackCount ?: pl.tracks.size.takeIf { it > 0 })?.let { "$it tracks" },
                         when (pl.isPublic) { true -> "public"; false -> "private"; null -> null },

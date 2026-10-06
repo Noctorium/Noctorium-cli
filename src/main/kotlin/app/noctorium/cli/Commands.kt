@@ -1,17 +1,23 @@
 package app.noctorium.cli
 
+import app.noctorium.bandcamp.BandcampMusicProvider
 import app.noctorium.cli.tui.Tui
 import app.noctorium.cli.tui.formatTime
 import app.noctorium.cli.update.CliUpdates
 import app.noctorium.cli.web.WebPlayer
 import app.noctorium.core.AppState
+import app.noctorium.domain.Playlist
 import app.noctorium.domain.ProviderType
+import app.noctorium.domain.SearchResults
+import app.noctorium.domain.pageUrl
 import app.noctorium.playback.MpvPlaybackEngine
 import app.noctorium.playback.PlaybackTool
 import app.noctorium.playback.PlaybackToolInstaller
 import app.noctorium.playback.ToolOrigin
 import app.noctorium.settings.AccountConnectionStatus
+import app.noctorium.settings.NoctoriumPreferences
 import app.noctorium.settings.ScrobbleConnectionStatus
+import app.noctorium.settings.SettingsRepository
 import app.noctorium.update.Version
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -30,11 +36,11 @@ import java.nio.file.Path
  */
 object Commands {
     private val usage = """
-        |Noctorium $cliVersion — YouTube Music and SoundCloud, in a terminal and a browser.
+        |Noctorium $cliVersion — YouTube Music, SoundCloud and Bandcamp, in a terminal and a browser.
         |
         |  noctorium                     the player, in this terminal
         |  noctorium play <words|link>   the player, already playing the first match
-        |  noctorium search <words>      print what both services have, and stop
+        |  noctorium search <words>      print what the services have, and stop
         |  noctorium web                 your library and queue in any browser in the house
         |      --port <n>                  (7300)
         |      --here-only                 only from this computer, not the network
@@ -43,7 +49,10 @@ object Commands {
         |      --from-desktop              copy the sign-in from Noctorium on this computer
         |      --phone                     YouTube Music: scan a code with the phone app
         |      --cookies <file>            a cookies.txt from a signed-in browser
-        |  noctorium logout <youtube|soundcloud|spotify|lastfm|listenbrainz>
+        |  noctorium login bandcamp <name>
+        |                                your collection at bandcamp.com/<name>, with no password;
+        |                                with no name, the one Noctorium on this computer shows
+        |  noctorium logout <youtube|soundcloud|bandcamp|spotify|lastfm|listenbrainz>
         |  noctorium status              accounts, tools and where things are kept
         |  noctorium tools               install or update yt-dlp and mpv
         |  noctorium update              install a newer Noctorium CLI, if there is one
@@ -124,29 +133,44 @@ object Commands {
         val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
         return try {
             state.search(query)
+            fun SearchResults.found() = tracks.isNotEmpty() || playlists.isNotEmpty()
             val results = runBlocking {
                 withTimeoutOrNull(30_000) {
-                    while (!(state.ui.value.searchQuery == query && !state.ui.value.searchLoading && state.ui.value.searchResults.tracks.isNotEmpty())) delay(150)
+                    while (!(state.ui.value.searchQuery == query && !state.ui.value.searchLoading && state.ui.value.searchResults.found())) delay(150)
                     state.ui.value.searchResults
                 }
             } ?: state.ui.value.searchResults
             val out = Out()
-            if (results.tracks.isEmpty()) {
+            if (!results.found()) {
                 println("Nothing found for \"$query\".")
                 return 1
             }
-            println(out.bold("Tracks"))
-            results.tracks.forEachIndexed { i, track ->
-                println(
-                    "  ${out.dim((i + 1).toString().padStart(2))}  ${out.badge(track.provider)}  ${out.bold(track.title)}  ${out.dim(track.artistLine)}  ${out.dim(formatTime(track.durationMs))}",
-                )
-                println("      ${out.dim(track.sourceUrl)}")
+            if (results.tracks.isNotEmpty()) {
+                println(out.bold("Tracks"))
+                results.tracks.forEachIndexed { i, track ->
+                    println(
+                        "  ${out.dim((i + 1).toString().padStart(2))}  ${out.badge(track.provider)}  ${out.bold(track.title)}  ${out.dim(track.artistLine)}  ${out.dim(formatTime(track.durationMs))}",
+                    )
+                    println("      ${out.dim(track.pageUrl)}")
+                }
             }
-            if (results.playlists.isNotEmpty()) {
-                println()
-                println(out.bold("Playlists"))
-                results.playlists.forEach { println("  ${out.badge(it.provider)}  ${it.title}  ${out.dim(it.sourceUrl.orEmpty())}") }
+            // Bandcamp's albums and artists come as playlists, which is how they open; each is listed as what it is.
+            val (artists, lists) = results.playlists.partition(BandcampMusicProvider::isArtist)
+            val (albums, playlists) = lists.partition { it.provider == ProviderType.BANDCAMP }
+            var first = results.tracks.isEmpty()
+            fun section(title: String, found: List<Playlist>) {
+                if (found.isEmpty()) return
+                if (!first) println()
+                first = false
+                println(out.bold(title))
+                found.forEach { playlist ->
+                    val owner = playlist.ownerName?.takeIf(String::isNotBlank)?.let { "  " + out.dim(it) }.orEmpty()
+                    println("  ${out.badge(playlist.provider)}  ${playlist.title}$owner  ${out.dim(playlist.sourceUrl.orEmpty())}")
+                }
             }
+            section("Playlists", playlists)
+            section("Albums", albums)
+            section("Artists", artists)
             println()
             println(out.dim("Play one: noctorium play <link>"))
             0
@@ -216,11 +240,16 @@ object Commands {
     }
 
     private fun login(options: List<String>): Int {
-        val service = options.firstOrNull { !it.startsWith("--") }?.lowercase() ?: "youtube"
+        val words = options.filterNot { it.startsWith("--") }
+        val service = words.firstOrNull()?.lowercase() ?: "youtube"
+        if (service == "bandcamp" || service == "bc") return bandcamp(words.drop(1).joinToString(" "), fromDesktop = "--from-desktop" in options)
         val youTube = when (service) {
             "youtube", "yt", "youtube-music", "ytm" -> true
             "soundcloud", "sc" -> false
-            else -> { System.err.println("Sign in to youtube or soundcloud. Spotify and Last.fm are under Settings in the player."); return 2 }
+            else -> {
+                System.err.println("Sign in to youtube or soundcloud, or name your Bandcamp collection: noctorium login bandcamp <name>. Spotify and Last.fm are under Settings in the player.")
+                return 2
+            }
         }
         val parts = parts()
         val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
@@ -263,6 +292,59 @@ object Commands {
         }
     }
 
+    /**
+     * `noctorium login bandcamp <name>`: the collection the library shows, at bandcamp.com/<name>.
+     *
+     * Not a sign-in. Bandcamp shows a fan's collection and wishlist to anybody, so a name is all it takes and
+     * nothing secret is kept. Core checks the name with Bandcamp before keeping it -- a misspelt one would
+     * otherwise be an empty library with no reason given -- and this waits for that answer. With no name, the
+     * one Noctorium on this computer already shows is used.
+     */
+    private fun bandcamp(given: String, fromDesktop: Boolean): Int {
+        val name = given.trim().ifBlank { DesktopSignIn.bandcampName().orEmpty() }
+        if (name.isBlank()) {
+            System.err.println(
+                if (fromDesktop) "Noctorium on this computer shows no Bandcamp collection."
+                else "Whose collection: noctorium login bandcamp <name>, with the name from bandcamp.com/<name>.",
+            )
+            return 2
+        }
+        val parts = parts()
+        val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
+        val out = Out()
+        try {
+            state.setBandcampUsername(name)
+            // Checking is set before the call returns, and cleared with the answer.
+            val answered = runBlocking { withTimeoutOrNull(30_000) { while (state.settings.value.bandcamp.checking) delay(150) } } != null
+            val bandcamp = state.settings.value.bandcamp
+            if (!answered) {
+                println("  ${out.warn("!")} Bandcamp did not answer in time. Try again in a moment.")
+                return 1
+            }
+            bandcamp.message?.let { problem ->
+                println("  ${out.warn("!")} $problem")
+                return 1
+            }
+            val kept = state.settings.value.preferences.bandcampUsername
+            saved { it.bandcampUsername == kept }
+            val who = bandcamp.fanName.takeIf { it.isNotBlank() && !it.equals(kept, ignoreCase = true) }?.let { "$it, " }.orEmpty()
+            println("  ${out.good("✓")} Your Bandcamp collection is in the library: ${who}bandcamp.com/$kept.")
+            return 0
+        } finally {
+            state.close()
+        }
+    }
+
+    /**
+     * Waits, five seconds at most, for what AppState saves in the background to reach the settings file. A
+     * command that closes straight after changing a setting would otherwise sometimes stop the save with it.
+     */
+    private fun saved(done: (NoctoriumPreferences) -> Boolean) {
+        val file = SettingsRepository()
+        val until = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < until && !done(file.load())) Thread.sleep(100)
+    }
+
     private fun phone(state: AppState, out: Out): String? {
         state.receiveYouTubeSignIn()
         val code = runBlocking {
@@ -296,13 +378,20 @@ object Commands {
     }
 
     private fun logout(options: List<String>): Int {
-        val service = options.firstOrNull()?.lowercase() ?: run { System.err.println("Sign out of which: youtube, soundcloud, spotify, lastfm or listenbrainz?"); return 2 }
+        val service = options.firstOrNull()?.lowercase() ?: run { System.err.println("Sign out of which: youtube, soundcloud, bandcamp, spotify, lastfm or listenbrainz?"); return 2 }
         val parts = parts()
         val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
         try {
             when (service) {
                 "youtube", "yt", "ytm" -> state.disconnectAccount(ProviderType.YOUTUBE_MUSIC)
                 "soundcloud", "sc" -> state.disconnectAccount(ProviderType.SOUNDCLOUD)
+                // Nothing to sign out of: the name is forgotten, and the collection leaves the library.
+                "bandcamp", "bc" -> {
+                    state.setBandcampUsername("")
+                    saved { it.bandcampUsername.isBlank() }
+                    println("Your Bandcamp collection is out of the library here. Noctorium on your other devices is unchanged.")
+                    return 0
+                }
                 "spotify" -> state.disconnectSpotify()
                 "lastfm", "last.fm" -> state.disconnectLastFm()
                 "listenbrainz" -> state.disconnectListenBrainz()
@@ -335,6 +424,8 @@ object Commands {
             line("YouTube Music", settings.youtubeAccount.status == AccountConnectionStatus.CONNECTED, account(settings.youtubeAccount))
             line("SoundCloud", settings.soundCloudAccount.status == AccountConnectionStatus.CONNECTED, account(settings.soundCloudAccount))
             line("Spotify", settings.spotify.connected, if (settings.spotify.connected) settings.spotify.accountName else "not connected")
+            val bandcamp = settings.preferences.bandcampUsername
+            line("Bandcamp", bandcamp.isNotBlank(), if (bandcamp.isNotBlank()) "bandcamp.com/$bandcamp" else "no collection — noctorium login bandcamp <name>")
             line("Last.fm", settings.scrobbling.lastFm.status == ScrobbleConnectionStatus.CONNECTED, settings.scrobbling.lastFm.username ?: "not connected")
             line("ListenBrainz", settings.scrobbling.listenBrainz.status == ScrobbleConnectionStatus.CONNECTED, settings.scrobbling.listenBrainz.username ?: "not connected")
             println()

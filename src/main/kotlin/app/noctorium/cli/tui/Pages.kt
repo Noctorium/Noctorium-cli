@@ -1,11 +1,13 @@
 package app.noctorium.cli.tui
 
+import app.noctorium.bandcamp.BandcampMusicProvider
 import app.noctorium.core.SearchMode
 import app.noctorium.domain.PlaybackOrigin
 import app.noctorium.domain.Playlist
 import app.noctorium.domain.ProviderType
 import app.noctorium.domain.Track
 import app.noctorium.domain.editableOnService
+import app.noctorium.domain.pageUrl
 import app.noctorium.downloads.DownloadStage
 import app.noctorium.lyrics.LyricsProviderStatus
 
@@ -54,7 +56,7 @@ object Pages {
     private fun subtitle(tui: Tui): String? {
         val state = tui.state
         return when (tui.page) {
-            Page.HOME -> if (state.ui.value.homeLoading) "Loading…" else "From both services"
+            Page.HOME -> if (state.ui.value.homeLoading) "Loading…" else "From every service"
             Page.SEARCH -> if (state.ui.value.searchLoading) "Searching…" else state.ui.value.searchMode.displayName
             Page.LIBRARY -> {
                 val library = state.library.value
@@ -63,7 +65,7 @@ object Pages {
                 when {
                     tui.libraryOpen && local != null -> "On this computer · ${local.tracks.size} tracks · Enter play · R rename · D delete · Esc back"
                     tui.libraryOpen && open != null -> listOfNotNull(
-                        open.provider.displayName,
+                        if (BandcampMusicProvider.isArtist(open)) "Artist on Bandcamp" else open.provider.displayName,
                         (open.trackCount ?: open.tracks.size).let { "$it tracks" },
                         when (open.isPublic) { true -> "public"; false -> "private"; null -> null },
                         if (library.openPlaylistLoading) "loading…" else null,
@@ -120,7 +122,7 @@ object Pages {
             add(Row.Gap)
         }
         if (ui.homeSections.isEmpty()) {
-            if (ui.homeLoading) add(Row.Note("Gathering your home from YouTube Music and SoundCloud…"))
+            if (ui.homeLoading) add(Row.Note("Gathering your home from YouTube Music, SoundCloud and Bandcamp…"))
             else add(Row.Note("Nothing here yet. Sign in under Settings (8), or search with /.", Row.Tone.QUIET))
         }
         ui.errorMessage?.let { add(Row.Note(it, Row.Tone.WARN)) }
@@ -130,22 +132,33 @@ object Pages {
         val ui = tui.state.ui.value
         val results = ui.searchResults
         if (ui.searchQuery.isBlank()) {
-            add(Row.Note("Type what you are looking for. Both services are searched at once; Tab changes which."))
+            add(Row.Note("Type what you are looking for. Every service is searched at once; Tab changes which."))
             return@buildList
         }
+        /*
+         * Bandcamp answers with its albums and its artists as playlists, which is what lets Enter open either
+         * like any other list, so they are listed under what they are rather than as playlists. The same
+         * albums and artists come a second time as bare names, in `albums` and `artists`, and are left out
+         * there: a name can only be searched for again, and the playlist above it already opens it.
+         */
+        val (bandcampArtists, lists) = results.playlists.partition(BandcampMusicProvider::isArtist)
+        val (bandcampAlbums, playlists) = lists.partition { it.provider == ProviderType.BANDCAMP }
+        val albums = results.albums.filter { it.provider != ProviderType.BANDCAMP }
+        val artists = results.artists.filter { it.provider != ProviderType.BANDCAMP }
         if (results.tracks.isNotEmpty()) {
             add(Row.Header("Tracks", "${results.tracks.size}"))
             results.tracks.forEach { add(Row.Song(it, results.tracks, PlaybackOrigin.SEARCH)) }
             add(Row.Gap)
         }
-        if (results.playlists.isNotEmpty()) {
+        if (playlists.isNotEmpty()) {
             add(Row.Header("Playlists"))
-            results.playlists.forEach { add(Row.PlaylistItem(it)) }
+            playlists.forEach { add(Row.PlaylistItem(it)) }
             add(Row.Gap)
         }
-        if (results.albums.isNotEmpty()) {
+        if (bandcampAlbums.isNotEmpty() || albums.isNotEmpty()) {
             add(Row.Header("Albums"))
-            results.albums.forEach { album ->
+            bandcampAlbums.forEach { add(Row.PlaylistItem(it)) }
+            albums.forEach { album ->
                 add(
                     Row.Action(
                         album.title,
@@ -156,9 +169,10 @@ object Pages {
             }
             add(Row.Gap)
         }
-        if (results.artists.isNotEmpty()) {
+        if (bandcampArtists.isNotEmpty() || artists.isNotEmpty()) {
             add(Row.Header("Artists"))
-            results.artists.forEach { artist ->
+            bandcampArtists.forEach { add(Row.PlaylistItem(it)) }
+            artists.forEach { artist ->
                 add(Row.Action(artist.name, hint = artist.provider.displayName, run = { search(tui, artist.name) }))
             }
         }
@@ -198,7 +212,8 @@ object Pages {
         }
         library.errorMessage?.let { add(Row.Note(it, Row.Tone.BAD)) }
         val byService = library.playlists.groupBy { it.provider }
-        listOf(ProviderType.YOUTUBE_MUSIC, ProviderType.YOUTUBE_VIDEO, ProviderType.SOUNDCLOUD, ProviderType.SPOTIFY).forEach { provider ->
+        // Bandcamp's are a fan's collection, a playlist for each release, and their wishlist.
+        listOf(ProviderType.YOUTUBE_MUSIC, ProviderType.YOUTUBE_VIDEO, ProviderType.SOUNDCLOUD, ProviderType.SPOTIFY, ProviderType.BANDCAMP).forEach { provider ->
             val lists = byService[provider].orEmpty()
             if (lists.isEmpty()) return@forEach
             add(Row.Header(provider.displayName, "${lists.size}"))
@@ -348,8 +363,11 @@ object Pages {
         tui.state.setSearchMode(modes[(tui.state.ui.value.searchMode.ordinal + 1) % modes.size])
     }
 
-    private fun looksLikeLink(text: String) = text.startsWith("http://") || text.startsWith("https://") ||
-        text.startsWith("music.youtube.com") || text.startsWith("soundcloud.com") || text.startsWith("youtu.be")
+    /** Whether what was typed is an address to open rather than words to look for. */
+    fun looksLikeLink(text: String) = text.startsWith("http://") || text.startsWith("https://") ||
+        text.startsWith("music.youtube.com") || text.startsWith("soundcloud.com") || text.startsWith("youtu.be") ||
+        // Bandcamp's addresses are the artist's own, artist.bandcamp.com/album/…, and pasted without the https.
+        ('/' in text && text.substringBefore('/').endsWith(".bandcamp.com"))
 
     fun handle(tui: Tui, input: Input): Boolean {
         if (tui.page == Page.NOW_PLAYING) return NowPlaying.handle(tui, input)
@@ -462,10 +480,14 @@ object Tracks {
             "a" -> { state.addToQueue(track); tui.toast("Added to the queue: ${track.title}") }
             "A" -> { state.playNext(track); tui.toast("Playing next: ${track.title}") }
             "l" -> tui.like(track)
-            "d" -> { state.downloadTrack(track); tui.toast("Downloading ${track.title}…") }
-            "e" -> if (state.canSaveAsMp3()) { state.exportTrack(track); tui.toast("Saving ${track.title} as an MP3…") } else tui.toast("Saving as MP3 needs mpv", Row.Tone.WARN)
+            "d" -> if (!state.canKeep(track)) notKept(tui) else { state.downloadTrack(track); tui.toast("Downloading ${track.title}…") }
+            "e" -> when {
+                !state.canKeep(track) -> notKept(tui)
+                state.canSaveAsMp3() -> { state.exportTrack(track); tui.toast("Saving ${track.title} as an MP3…") }
+                else -> tui.toast("Saving as MP3 needs mpv", Row.Tone.WARN)
+            }
             "c" -> state.copyTrackLink(track)
-            "o" -> state.openExternalUrl(track.sourceUrl)
+            "o" -> state.openExternalUrl(track.pageUrl)
             "i" -> { val pinned = state.isPinned(track); state.togglePin(track); tui.toast(if (pinned) "Unpinned from Home" else "Pinned to Home") }
             "P" -> tui.overlays.addLast(addToPlaylist(tui, track))
             "x" -> remove(tui, row)
@@ -475,6 +497,13 @@ object Tracks {
         }
         return true
     }
+
+    /**
+     * What d and e say on a track that may not be kept: Bandcamp's, which are streamed to be heard on the way
+     * to being bought (see AppState.canKeep). Said here rather than left to core, which would refuse as well,
+     * so that "Downloading…" is never shown for a download that is not going to happen.
+     */
+    fun notKept(tui: Tui) = tui.toast("Bandcamp's songs are for listening here; to keep one, buy it on its page (o opens it)", Row.Tone.WARN, 6)
 
     private fun remove(tui: Tui, row: Row.Song) {
         val state = tui.state

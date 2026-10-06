@@ -1,5 +1,6 @@
 package app.noctorium.cli.tui
 
+import app.noctorium.domain.pageUrl
 import app.noctorium.playback.PlaybackStatus
 
 /**
@@ -71,7 +72,8 @@ object NowPlaying {
         val actionsY = infoY + 7
         if (actionsY < y + h) {
             val liked = state.likes.value.isLiked(track)
-            canvas.write(left, actionsY, if (liked) "♥ liked" else "♡ l to like", if (liked) p.accent else p.faint)
+            // Only where a like can go to the account: not under a Bandcamp song, say.
+            if (liked || track.provider.keepsLikes) canvas.write(left, actionsY, if (liked) "♥ liked" else "♡ l to like", if (liked) p.accent else p.faint)
             canvas.write(left + 14, actionsY, track.provider.displayName, p.badgeColour(track.provider), null, BOLD, max = infoW - 14)
         }
         val follow = state.artistFollow.value
@@ -182,9 +184,9 @@ object NowPlaying {
             "f" -> state.toggleFollowArtist()
             "a" -> Unit
             "o" -> lyrics.outcomes.firstOrNull { it.provider == lyrics.selectedProvider }?.result?.sourceUrl?.let(state::openExternalUrl)
-                ?: state.openExternalUrl(track.sourceUrl)
+                ?: state.openExternalUrl(track.pageUrl)
             "c" -> state.copyTrackLink(track)
-            "d" -> { state.downloadTrack(track); tui.toast("Downloading ${track.title}…") }
+            "d" -> if (!state.canKeep(track)) Tracks.notKept(tui) else { state.downloadTrack(track); tui.toast("Downloading ${track.title}…") }
             "P" -> tui.overlays.addLast(Tracks.addToPlaylist(tui, track))
             "R" -> { state.loadLyrics(track, forceRefresh = true); tui.toast("Asking every source again…") }
             else -> return false

@@ -1,5 +1,6 @@
 package app.noctorium.cli.web
 
+import app.noctorium.bandcamp.BandcampGenre
 import app.noctorium.cli.DesktopSignIn
 import app.noctorium.core.AppState
 import app.noctorium.core.LinkAction
@@ -8,6 +9,8 @@ import app.noctorium.core.SearchMode
 import app.noctorium.domain.PlaybackOrigin
 import app.noctorium.domain.Playlist
 import app.noctorium.domain.ProviderType
+import app.noctorium.domain.Track
+import app.noctorium.domain.editableOnService
 import app.noctorium.lyrics.LyricsProviderId
 import app.noctorium.playback.RepeatMode
 import app.noctorium.settings.AccentPreset
@@ -109,18 +112,26 @@ class WebCommands(
                 val track = command.track("track")
                 when (val where = command.string("provider")) {
                     null, "LOCAL" -> state.createPlaylist(title, track)
-                    else -> state.createPlaylist(title, ProviderType.valueOf(where), listOfNotNull(track), command.bool("public") ?: false)
+                    else -> {
+                        val provider = runCatching { ProviderType.valueOf(where) }.getOrNull() ?: return "No such service: $where"
+                        // Core says itself that a playlist cannot be made on the others.
+                        if (track != null && provider in WRITABLE && !fits(track, provider)) return onlyItsOwn(provider)
+                        state.createPlaylist(title, provider, listOfNotNull(track), command.bool("public") ?: false)
+                    }
                 }
             }
             "addToPlaylist" -> {
                 val track = command.track("track") ?: return "No track"
-                command.string("localId")?.let { state.addTrackToPlaylist(it, track) }
-                    ?: state.addTrackToPlaylist(playlist(command.string("key")) ?: return "No such playlist", track)
+                command.string("localId")?.let { state.addTrackToPlaylist(it, track) } ?: run {
+                    val playlist = writable(command.string("key")) { return it }
+                    if (!fits(track, playlist.provider)) return onlyItsOwn(playlist.provider)
+                    state.addTrackToPlaylist(playlist, track)
+                }
             }
             "removeFromPlaylist" -> {
                 val track = command.track("track") ?: return "No track"
                 command.string("localId")?.let { state.removeTrackFromPlaylist(it, track.queueKey) } ?: run {
-                    val playlist = playlist(command.string("key")) ?: return "No such playlist"
+                    val playlist = writable(command.string("key")) { return it }
                     when (playlist.provider) {
                         ProviderType.SOUNDCLOUD -> state.removeTrackFromSoundCloudPlaylist(playlist.id, track.id)
                         else -> state.removeTrackFromYouTubePlaylist(playlist.id, track.id)
@@ -130,12 +141,19 @@ class WebCommands(
             "movePlaylistTrack" -> {
                 val from = command.int("from") ?: return "No from"
                 val to = command.int("to") ?: return "No to"
-                command.string("localId")?.let { state.moveInLocalPlaylist(it, from, to) } ?: state.moveInYouTubePlaylist(from, to)
+                command.string("localId")?.let { state.moveInLocalPlaylist(it, from, to) } ?: run {
+                    // Core moves within the playlist that is open, which has to be the page's, and YouTube's own.
+                    val key = command.string("key")
+                    val open = state.library.value.openPlaylist?.takeIf { key == null || key == it.playlistKey }
+                        ?: return "That playlist is not open any more"
+                    if (!open.editableOnService() || open.provider == ProviderType.SOUNDCLOUD) return "\"${open.title}\" cannot be reordered from here"
+                    state.moveInYouTubePlaylist(from, to)
+                }
             }
             "renamePlaylist" -> {
                 val title = command.string("title")?.takeIf(String::isNotBlank) ?: return "No name"
                 command.string("localId")?.let { state.renamePlaylist(it, title) } ?: run {
-                    val playlist = playlist(command.string("key")) ?: return "No such playlist"
+                    val playlist = writable(command.string("key")) { return it }
                     when (playlist.provider) {
                         ProviderType.SOUNDCLOUD -> state.renameSoundCloudPlaylist(playlist.id, title)
                         else -> state.renameYouTubePlaylist(playlist.id, title)
@@ -144,7 +162,7 @@ class WebCommands(
             }
             "deletePlaylist" -> {
                 command.string("localId")?.let { state.deletePlaylist(it) } ?: run {
-                    val playlist = playlist(command.string("key")) ?: return "No such playlist"
+                    val playlist = writable(command.string("key")) { return it }
                     when (playlist.provider) {
                         ProviderType.SOUNDCLOUD -> state.deleteSoundCloudPlaylist(playlist.id)
                         else -> state.deleteYouTubePlaylist(playlist.id)
@@ -153,7 +171,7 @@ class WebCommands(
                 }
             }
             "visibility" -> {
-                val playlist = playlist(command.string("key")) ?: return "No such playlist"
+                val playlist = writable(command.string("key")) { return it }
                 val public = command.bool("public") ?: return "Public or not?"
                 when (playlist.provider) {
                     ProviderType.SOUNDCLOUD -> state.setSoundCloudPlaylistVisibility(playlist.id, public)
@@ -206,13 +224,20 @@ class WebCommands(
                 DesktopSignIn.fromCookies(state, youTube, null, command.string("text"))?.let { return it }
             }
             "copyDesktop" -> {
-                val problem = if (command.string("service") == "soundcloud") DesktopSignIn.copySoundCloud(state) else DesktopSignIn.copyYouTube(state)
+                val service = command.string("service")
+                val problem = when (service) {
+                    "soundcloud" -> DesktopSignIn.copySoundCloud(state)
+                    "bandcamp" -> DesktopSignIn.copyBandcamp(state)
+                    else -> DesktopSignIn.copyYouTube(state)
+                }
                 problem?.let { return it }
-                notice("Copied the sign-in from Noctorium on this computer")
+                // Bandcamp's name is checked with Bandcamp first, and Settings says how that went.
+                if (service != "bandcamp") notice("Copied the sign-in from Noctorium on this computer")
             }
             "signOut" -> when (command.string("service")) {
                 "youtube" -> state.disconnectAccount(ProviderType.YOUTUBE_MUSIC)
                 "soundcloud" -> state.disconnectAccount(ProviderType.SOUNDCLOUD)
+                "bandcamp" -> state.setBandcampUsername("")
                 "spotify" -> state.disconnectSpotify()
                 "lastfm" -> state.disconnectLastFm()
                 "listenbrainz" -> state.disconnectListenBrainz()
@@ -229,6 +254,11 @@ class WebCommands(
                 ),
             )
             "soundCloudUsername" -> state.setSoundCloudUsername(command.string("name") ?: return "No name")
+            // A name, or a bandcamp.com address; a blank one takes the collection out of the library.
+            "bandcampUsername" -> state.setBandcampUsername(command.string("name") ?: return "No name")
+            "bandcampGenres" -> state.setBandcampGenres(
+                (command.strings("genres") ?: return "No genres").mapNotNull { name -> BandcampGenre.entries.firstOrNull { it.name == name } },
+            )
             "spotify" -> state.connectSpotify()
             "lastfm" -> state.beginLastFmLogin()
             "lastfmFinish" -> state.finishLastFmLogin()
@@ -240,6 +270,33 @@ class WebCommands(
         }
         return null
     }
+
+    /**
+     * A playlist the page wants changed on its service, by [key], or [refused] with why it cannot be.
+     *
+     * Only the account's own YouTube and SoundCloud playlists can be written to. Everything else that opens as
+     * a playlist -- a Bandcamp album, artist or wishlist, Spotify's lists, YouTube's own Liked Music -- would
+     * otherwise fall through the `else` of each write above to YouTube's, as an id YouTube never gave out.
+     * The page offers none of these for them; this is so that no page, old or new, can ask anyway.
+     */
+    private inline fun writable(key: String?, refused: (String) -> Nothing): Playlist {
+        val playlist = playlist(key) ?: refused("No such playlist")
+        if (!playlist.editableOnService()) refused("\"${playlist.title}\" can only be changed on ${playlist.provider.displayName} itself")
+        return playlist
+    }
+
+    /**
+     * Whether [track] can go into a playlist on [provider]: a service's playlists take that service's tracks.
+     * Core turns away a SoundCloud track from a YouTube playlist, but would send a Bandcamp one's id to YouTube
+     * as if it were a video's.
+     */
+    private fun fits(track: Track, provider: ProviderType): Boolean = when (provider) {
+        ProviderType.SOUNDCLOUD -> track.provider == ProviderType.SOUNDCLOUD
+        ProviderType.YOUTUBE_MUSIC, ProviderType.YOUTUBE_VIDEO -> track.provider == ProviderType.YOUTUBE_MUSIC || track.provider == ProviderType.YOUTUBE_VIDEO
+        else -> false
+    }
+
+    private fun onlyItsOwn(provider: ProviderType) = "Only ${provider.displayName} tracks can go into a ${provider.displayName} playlist"
 
     /** A playlist by key, from wherever the page could have seen it. */
     private fun playlist(key: String?): Playlist? {
@@ -253,7 +310,13 @@ class WebCommands(
     }
 }
 
+/** The services whose playlists Noctorium makes and changes. */
+private val WRITABLE = setOf(ProviderType.YOUTUBE_MUSIC, ProviderType.YOUTUBE_VIDEO, ProviderType.SOUNDCLOUD)
+
 private fun JsonObject.string(name: String) = this[name]?.let { runCatching { it.jsonPrimitive.contentOrNull }.getOrNull() }
+private fun JsonObject.strings(name: String) = this[name]?.let { element ->
+    runCatching { element.jsonArray.mapNotNull { it.jsonPrimitive.contentOrNull } }.getOrNull()
+}
 private fun JsonObject.long(name: String) = this[name]?.let { runCatching { it.jsonPrimitive.longOrNull }.getOrNull() }
 private fun JsonObject.int(name: String) = this[name]?.let { runCatching { it.jsonPrimitive.intOrNull }.getOrNull() }
 private fun JsonObject.float(name: String) = this[name]?.let { runCatching { it.jsonPrimitive.floatOrNull }.getOrNull() }

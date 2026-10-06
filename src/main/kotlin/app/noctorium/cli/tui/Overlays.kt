@@ -36,7 +36,7 @@ sealed interface Overlay {
                 "↑ ↓  PgUp PgDn" to "Choose; the mouse wheel and clicks work too",
                 "Enter" to "Play it from here, or open it",
                 "Esc  Backspace" to "Back",
-                "/" to "Search YouTube Music and SoundCloud",
+                "/" to "Search every service at once, or paste a link",
             ),
             "Playing" to listOf(
                 "Space" to "Play or pause",
@@ -148,6 +148,96 @@ sealed interface Overlay {
                         options[index].second()
                     } else {
                         tui.overlays.removeLastOrNull()
+                    }
+                }
+                else -> Unit
+            }
+            return true
+        }
+    }
+
+    /**
+     * Things each on or off, ticked in place: the genres Home has a Bandcamp row for.
+     *
+     * What is ticked stays here until the list is put away, and is handed to [done] once, then. Every change
+     * to the genres reads Home again from Bandcamp, and one reading for a handful of ticks is kinder than a
+     * reading for each -- several at once could also finish out of order and leave an older Home showing.
+     */
+    class Checklist(
+        val title: String,
+        val labels: List<String>,
+        /** The ones ticked to begin with, by index into [labels], in their order. */
+        initial: List<Int>,
+        val note: String? = null,
+        /** The ticked ones when the list is put away: those it began with in their order, then the new ones. */
+        val done: (List<Int>) -> Unit,
+    ) : Overlay {
+        private val list = ListState()
+        private val ticked = initial.filter { it in labels.indices }.distinct().toMutableList()
+        private val rows = labels.map { Row.Action(it) }
+        private var top = 0
+        private var shown = 0
+
+        /** The ones ticked now, before [done] has them. */
+        val chosen: List<Int> get() = ticked.toList()
+
+        private fun toggle(index: Int) {
+            if (index !in labels.indices) return
+            if (!ticked.remove(index)) ticked += index
+        }
+
+        private fun close(tui: Tui) {
+            tui.overlays.removeLastOrNull()
+            done(ticked.toList())
+        }
+
+        override fun draw(tui: Tui, canvas: Canvas, w: Int, h: Int) {
+            val p = tui.palette
+            val visible = minOf(labels.size, h - 8).coerceAtLeast(1)
+            val width = maxOf((labels.maxOfOrNull { Canvas.displayWidth(it) } ?: 10) + 12, (note?.let(Canvas::displayWidth) ?: 0) + 6).coerceIn(44, 80)
+            panel(tui, canvas, w, h, width, visible + 3 + (if (note != null) 2 else 0), title) { x, y, pw, _ ->
+                top = y
+                shown = visible
+                list.follow(visible)
+                for (i in 0 until visible) {
+                    val index = list.offset + i
+                    val label = labels.getOrNull(index) ?: break
+                    val selected = index == list.selected
+                    val on = index in ticked
+                    val back = if (selected) p.selection else p.card
+                    if (selected) canvas.fill(x - 1, y + i, pw + 2, 1, p.selection)
+                    canvas.write(x, y + i, if (selected) "›" else " ", p.accent, back)
+                    canvas.write(x + 2, y + i, if (on) "✓" else "·", if (on) p.accent else p.faint, back, BOLD)
+                    canvas.write(x + 4, y + i, label, if (on || selected) p.text else p.subtext, back, if (selected) BOLD else 0, max = pw - 5)
+                }
+                note?.let { canvas.write(x, y + visible + 1, it, p.faint, p.card, ITALIC, max = pw) }
+            }
+        }
+
+        override fun handle(tui: Tui, input: Input): Boolean {
+            when {
+                input is Input.Key && input.key == Keys.UP -> list.move(rows, -1)
+                input is Input.Key && input.key == Keys.DOWN -> list.move(rows, 1)
+                input is Input.Key && input.key == Keys.ENTER -> toggle(list.selected)
+                input is Input.Text && input.char == " " -> toggle(list.selected)
+                input is Input.Key && (input.key == Keys.ESCAPE || input.key == Keys.BACKSPACE) -> close(tui)
+                input is Input.Text && input.char == "q" -> close(tui)
+                else -> Unit
+            }
+            return true
+        }
+
+        override fun mouse(tui: Tui, input: Input.Mouse): Boolean {
+            when (input.kind) {
+                MouseKind.WHEEL_UP -> list.move(rows, -1)
+                MouseKind.WHEEL_DOWN -> list.move(rows, 1)
+                MouseKind.PRESS -> {
+                    val index = list.offset + (input.y - top)
+                    if (input.y >= top && input.y < top + shown && index in labels.indices) {
+                        list.selected = index
+                        toggle(index)
+                    } else {
+                        close(tui)
                     }
                 }
                 else -> Unit

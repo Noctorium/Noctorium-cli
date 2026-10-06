@@ -28,6 +28,9 @@ import java.nio.file.StandardCopyOption
  * - **The phone, for YouTube Music.** The phone hands its session over the local network, encrypted, by
  *   scanning a code: AppState already does this for the desktop.
  * - **A cookies.txt**, exported from any browser that is signed in, or cookies pasted as text.
+ *
+ * Bandcamp needs none of this: a fan's collection is public, and the name in their address is all it takes.
+ * The desktop's is offered all the same, so it need not be typed twice.
  */
 object DesktopSignIn {
     private fun desktopPreferences(): NoctoriumPreferences? {
@@ -89,6 +92,21 @@ object DesktopSignIn {
             SoundCloudToken.fromCookieFile(target),
             preferences.soundCloudUsername.takeIf(String::isNotBlank),
         )
+        return null
+    }
+
+    /**
+     * The Bandcamp name whose collection Noctorium on this computer shows, or null when it shows none.
+     *
+     * Not a session, only the name in somebody's bandcamp.com address, so there is nothing to copy but the
+     * name itself; it is checked with Bandcamp again here, as any name given here is.
+     */
+    fun bandcampName(): String? = desktopPreferences()?.bandcampUsername?.takeIf(String::isNotBlank)
+
+    /** Shows the collection Noctorium on this computer shows. Null when it has one, otherwise why not. */
+    fun copyBandcamp(state: AppState): String? {
+        val name = bandcampName() ?: return "Noctorium on this computer shows no Bandcamp collection."
+        state.setBandcampUsername(name)
         return null
     }
 
