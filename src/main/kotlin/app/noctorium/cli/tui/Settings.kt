@@ -246,6 +246,13 @@ object Settings {
                 tui.preferences.save()
             }),
         )
+        val nowPlaying = tui.preferences.nowPlaying
+        add(
+            Row.Action("Now playing", value = nowPlaying.displayName, detail = nowPlaying.description, step = { by ->
+                tui.preferences.nowPlaying = cycle(TuiNowPlaying.entries, nowPlaying, by)
+                tui.preferences.save()
+            }),
+        )
         add(Row.Action("Time on the right", value = preferences.timeDisplay.displayName, step = { by -> state.setTimeDisplay(cycle(TimeDisplay.entries, preferences.timeDisplay, by)) }))
         add(
             Row.Action("Background", value = if (tui.preferences.terminalBackground) "The terminal's own" else "The theme's", step = {

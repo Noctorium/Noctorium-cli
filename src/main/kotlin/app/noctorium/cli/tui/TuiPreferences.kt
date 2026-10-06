@@ -22,6 +22,8 @@ class TuiPreferences(
     var keys: Map<String, List<String>> = emptyMap(),
     /** How the player bar along the foot of the screen is laid out. */
     var playerBar: TuiPlayerBar = TuiPlayerBar.FULL,
+    /** How Now playing is laid out. */
+    var nowPlaying: TuiNowPlaying = TuiNowPlaying.CLASSIC,
 ) {
     fun save() {
         val path = AppDirectories.resolve("terminal.json") ?: return
@@ -66,5 +68,26 @@ enum class TuiPlayerBar(val displayName: String, val description: String) {
     TASKBAR(
         "Taskbar",
         "A desktop's taskbar: a start button that opens Now playing, the song as a pressed button, and a tray with the volume and the clock.",
+    ),
+}
+
+/** How Now playing is laid out in a terminal; chosen apart from the desktop's and the phone's, as the bar is. */
+@Serializable
+enum class TuiNowPlaying(val displayName: String, val description: String) {
+    CLASSIC(
+        "Classic",
+        "The cover and the track on the left, and the lyrics beside them, lit line by line.",
+    ),
+    BIG_TYPE(
+        "Big type",
+        "No cover: the title in large letters and the artist under it, like a poster.",
+    ),
+    COVER(
+        "Cover",
+        "The cover as large as the terminal allows, with the track and the seek bar beneath it.",
+    ),
+    LYRICS(
+        "Lyrics",
+        "The lyrics large and centred on the line being sung, under a small cover and the controls.",
     ),
 }

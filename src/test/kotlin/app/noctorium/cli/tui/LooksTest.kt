@@ -46,6 +46,7 @@ class LooksTest {
     fun close() {
         // Never saved here, but put back all the same: the choices live in the test home's terminal.json.
         tui.preferences.playerBar = TuiPlayerBar.FULL
+        tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
         state.close()
     }
 
@@ -57,6 +58,9 @@ class LooksTest {
     private fun lines(canvas: Canvas): List<String> = (0 until canvas.height).map { y ->
         (0 until canvas.width).joinToString("") { x -> canvas.text[y * canvas.width + x] ?: " " }.trimEnd()
     }
+
+    /** What a line of the frame holds right of the sidebar. */
+    private fun body(line: String): String = line.substringAfter('│').trim()
 
     private fun render(w: Int = 150, h: Int = 42): Canvas {
         tui.frame(w, h)
@@ -100,9 +104,77 @@ class LooksTest {
 
     @Test
     fun `a layout this version does not know is the default, and the rest of the file is kept`() {
-        val read = TuiPreferences.read("""{"playerBar":"SOMETHING_LATER","coverArt":false,"keys":{"NEXT":["N"]}}""")
+        val read = TuiPreferences.read("""{"playerBar":"SOMETHING_LATER","nowPlaying":"ANOTHER","coverArt":false,"keys":{"NEXT":["N"]}}""")
         assertEquals(TuiPlayerBar.FULL, read.playerBar)
+        assertEquals(TuiNowPlaying.CLASSIC, read.nowPlaying)
         assertEquals(false, read.coverArt)
         assertEquals(mapOf("NEXT" to listOf("N")), read.keys)
+    }
+
+    /** The rows [text] makes in big type of [size], as they would be drawn from the left edge. */
+    private fun set(text: String, size: BigType.Size): List<String> {
+        val canvas = Canvas(BigType.width(text, size), size.rows)
+        canvas.clear(DEFAULT, DEFAULT)
+        BigType.draw(canvas, 0, 0, text, size, 0)
+        return lines(canvas)
+    }
+
+    @Test
+    fun `big type sets the title large across the middle, spaces out the artist, and its seek bar seeks`() {
+        playing()
+        tui.preferences.nowPlaying = TuiNowPlaying.BIG_TYPE
+        tui.page = Page.NOW_PLAYING
+        val canvas = render()
+        val page = lines(canvas)
+        val title = set("AWAKE", BigType.Size.LARGE)
+        val top = page.indexOfFirst { title[0] in it }
+        assertTrue(top >= 0, page.joinToString("\n"))
+        title.forEachIndexed { i, row -> assertTrue(row in page[top + i], page[top + i]) }
+        assertTrue(page.any { body(it) == "T Y C H O" }, page.joinToString("\n"))
+
+        val bar = page.indexOfFirst { "1:34" in it && "4:43" in it && it.indexOf("1:34") > 22 }
+        assertTrue(bar > top, page.joinToString("\n"))
+        val from = page[bar].indexOf("1:34") + 6
+        val to = page[bar].indexOf("4:43") - 2
+        tui.press(Input.Mouse(MouseKind.PRESS, (from + to) / 2, bar))
+        waitFor { state.playback.value.positionMs in 120_000L..165_000L }
+    }
+
+    @Test
+    fun `the cover layout puts the track under the cover, and the lyrics layout the controls over the words`() {
+        playing()
+        tui.page = Page.NOW_PLAYING
+        tui.preferences.nowPlaying = TuiNowPlaying.COVER
+        var page = lines(render())
+        val title = page.indexOfFirst { body(it) == "Awake" }
+        assertTrue(title > 10, page.joinToString("\n"))
+        assertEquals("Tycho", body(page[title + 1]))
+
+        tui.preferences.nowPlaying = TuiNowPlaying.LYRICS
+        page = lines(render())
+        val head = page.indexOfFirst { "|◀" in it && "1:34" in it }
+        assertTrue(head in 1..6, page.joinToString("\n"))
+        assertTrue(page.subList(1, head).any { "Awake" in it }, page.joinToString("\n"))
+    }
+
+    @Test
+    fun `big type has every glyph whole in both sizes, and sets what it can`() {
+        assertEquals(BigType.LARGE.keys, BigType.SMALL.keys)
+        for ((size, glyphs) in listOf(BigType.Size.LARGE to BigType.LARGE, BigType.Size.SMALL to BigType.SMALL)) {
+            glyphs.forEach { (char, glyph) ->
+                assertEquals(size.dots, glyph.rows.size, "$size '$char' rows")
+                assertTrue(glyph.rows.all { it.length == glyph.width }, "$size '$char' widths")
+            }
+        }
+        assertEquals("SENOR CAFE", BigType.fold("Señor Café"))
+        assertEquals("ISIK STRASSE", BigType.fold("ışık straße"))
+        assertEquals("GLORIA'S - THEME...", BigType.fold("Gloria’s — Theme…"))
+        assertEquals(null, BigType.fold("血と骨"))
+        assertEquals(null, BigType.fold("Звезда"))
+
+        assertEquals(BigType.Size.LARGE, BigType.fit("Amazing Grace", 100, 10)?.size)
+        assertEquals(BigType.Size.SMALL, BigType.fit("Amazing Grace", 60, 3)?.size)
+        assertEquals(listOf("BRIDGE OVER", "TROUBLED WATER"), BigType.fit("Bridge over troubled water", 90, 12)?.lines)
+        assertEquals(null, BigType.fit("Supercalifragilistic", 30, 10))
     }
 }

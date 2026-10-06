@@ -128,7 +128,22 @@ class TuiRenderCheck {
                     write(folder, "$name-narrow", tui, 84, 24)
                 }
             }
+            tui.preferences.playerBar = TuiPlayerBar.FULL
+
+            // Now playing's layouts, in the same two themes, wide and narrow.
+            tui.page = Page.NOW_PLAYING
+            for ((theme, style) in listOf(ThemePreset.NOCTORIUM_NIGHT to ProgressBarStyle.NEON, ThemePreset.CATPPUCCIN_LATTE to ProgressBarStyle.BEADS)) {
+                state.setTheme(theme)
+                state.setProgressBarStyle(style)
+                for (layout in TuiNowPlaying.entries) {
+                    tui.preferences.nowPlaying = layout
+                    val name = "now-${layout.name.lowercase()}-${theme.name.lowercase()}"
+                    write(folder, name, tui)
+                    write(folder, "$name-narrow", tui, 84, 30)
+                }
+            }
         } finally {
+            tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
             tui.preferences.playerBar = TuiPlayerBar.FULL
             state.setTheme(ThemePreset.NOCTORIUM_NIGHT)
             state.setProgressBarStyle(ProgressBarStyle.MINIMAL)

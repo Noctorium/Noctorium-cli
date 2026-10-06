@@ -256,13 +256,13 @@ object PlayerBar {
     }
 
     /** How wide [transport] is with its two ends. */
-    private const val TRANSPORT_WIDTH = 21
+    internal const val TRANSPORT_WIDTH = 21
 
     /**
      * Shuffle, previous, play, next and repeat, from [x]; without shuffle and repeat at the [ends] when there
      * is not the room, in which case [x] is still where shuffle would have been.
      */
-    private fun transport(tui: Tui, canvas: Canvas, x: Int, y: Int, bg: Rgb, ends: Boolean = true) {
+    internal fun transport(tui: Tui, canvas: Canvas, x: Int, y: Int, bg: Rgb, ends: Boolean = true) {
         val p = tui.palette
         val state = tui.state
         val queue = state.queue.state.value
@@ -289,7 +289,7 @@ object PlayerBar {
      * The seek bar with the time played before it and the length, or the time left, after it, in [w] cells from
      * [x]; clicking the bar seeks there.
      */
-    private fun seek(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int, bg: Rgb, roomAbove: Boolean) {
+    internal fun seek(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int, bg: Rgb, roomAbove: Boolean, roomBelow: Boolean = false) {
         val p = tui.palette
         val state = tui.state
         val playback = state.playback.value
@@ -305,7 +305,7 @@ object PlayerBar {
         val fraction = if (playback.durationMs > 0) (playback.positionMs.toFloat() / playback.durationMs).coerceIn(0f, 1f) else 0f
         SeekBars.draw(
             canvas, p, preferences.progressBarStyle, barX, y, barW, fraction, playback.status == PlaybackStatus.PLAYING, bg,
-            seed = track?.queueKey.orEmpty(), durationMs = playback.durationMs, roomAbove = roomAbove,
+            seed = track?.queueKey.orEmpty(), durationMs = playback.durationMs, roomAbove = roomAbove, roomBelow = roomBelow,
         )
         canvas.write(barX + barW + 1, y, total, p.subtext, bg)
         if (playback.durationMs > 0) {
