@@ -11,6 +11,7 @@ import app.noctorium.domain.SearchResults
 import app.noctorium.domain.Track
 import app.noctorium.playback.PlaybackEngine
 import app.noctorium.playback.PlaybackState
+import app.noctorium.playback.QueueStore
 import app.noctorium.providers.MusicProvider
 import app.noctorium.settings.AppDirectories
 import app.noctorium.settings.NoctoriumPreferences
@@ -100,6 +101,9 @@ object BandcampStandIn {
             injectedProviders = listOf<MusicProvider>(Provider()) + more,
             settingsRepository = settings,
             checkForUpdatesAtLaunch = false,
+            // No queue kept between tests: one test's queue put back into the next would be a queue nobody made.
+            queueStore = QueueStore(null),
+            sessionNamespace = "cli",
         )
     }
 

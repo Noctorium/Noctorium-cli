@@ -1,6 +1,7 @@
 package app.noctorium.cli.web
 
 import app.noctorium.bandcamp.BandcampGenre
+import app.noctorium.cli.AutoplayState
 import app.noctorium.cli.DesktopSignIn
 import app.noctorium.cli.cliVersion
 import app.noctorium.cli.tui.Settings
@@ -13,6 +14,7 @@ import app.noctorium.domain.Track
 import app.noctorium.domain.editableOnService
 import app.noctorium.playback.SleepTimerState
 import app.noctorium.playlists.LocalPlaylist
+import app.noctorium.settings.AutoplaySource
 import app.noctorium.settings.DEFAULT_HYBRID_SEARCH
 import app.noctorium.settings.ThemePreset
 import app.noctorium.settings.resolvedAccent
@@ -115,8 +117,30 @@ data class WPlayback(
 @Serializable
 data class WSleep(val kind: String = "off", val remainingMs: Long? = null)
 
+/**
+ * The queue, and autoplay after it: the songs autoplay has lined up, kept apart from the queue until they play
+ * or are kept, where they come from, and what autoplay is doing when there are none -- one of AutoplayState's
+ * names, in lower case, so the page says the same as the terminal's Queue page.
+ */
 @Serializable
-data class WQueue(val tracks: List<WTrack>, val currentIndex: Int, val shuffle: Boolean, val repeat: String, val origin: String? = null)
+data class WQueue(
+    val tracks: List<WTrack>,
+    val currentIndex: Int,
+    val shuffle: Boolean,
+    val repeat: String,
+    val origin: String? = null,
+    val suggestions: List<WTrack> = emptyList(),
+    val suggestionsFrom: String? = null,
+    /** Spotify, playing on Spotify itself, chooses what comes next; next asks it to move on. */
+    val continuesElsewhere: Boolean = false,
+    /** Whether next would go anywhere: on in the queue, round again, autoplay's first, or Spotify's choice. */
+    val hasNext: Boolean = false,
+    val autoplay: String = "off",
+)
+
+/** One of a setting's choices, with what it means. */
+@Serializable
+data class WChoice(val name: String, val title: String, val description: String? = null)
 
 @Serializable
 data class WSection(val id: String, val title: String, val subtitle: String? = null, val provider: ProviderType, val tracks: List<WTrack>, val playlists: List<WPlaylist>)
@@ -288,6 +312,12 @@ data class WSettings(
     val playbackSpeed: Float,
     /** The queue running out carries on with songs like the last. */
     val autoplay: Boolean,
+    /** Where autoplay's songs come from, by name, and the choices; and whether it leaves out ones played lately. */
+    val autoplayFrom: String,
+    val autoplaySources: List<WChoice>,
+    val avoidRecent: Boolean,
+    /** The queue is kept when the player closes and put back when it starts. */
+    val keepQueue: Boolean,
     /** The services a Hybrid search asks, by name, and every one it could. */
     val hybridSearch: List<String>,
     val hybridServices: List<String>,
@@ -364,7 +394,14 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
     fun queue(): JsonElement {
         val q = state.queue.state.value
         return wireJson.encodeToJsonElement(
-            WQueue(q.tracks.map { it.wire() }, q.currentIndex, q.shuffleEnabled, q.repeatMode.name.lowercase(), q.context?.originType?.name?.lowercase()),
+            WQueue(
+                q.tracks.map { it.wire() }, q.currentIndex, q.shuffleEnabled, q.repeatMode.name.lowercase(), q.context?.originType?.name?.lowercase(),
+                suggestions = q.suggestions.map { it.wire() },
+                suggestionsFrom = q.suggestionsFrom,
+                continuesElsewhere = q.continuesElsewhere,
+                hasNext = q.hasNext,
+                autoplay = AutoplayState.of(q, state.settings.value.preferences.autoplay).name.lowercase(),
+            ),
         )
     }
 
@@ -480,6 +517,10 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
                 ),
                 playbackSpeed = p.playbackSpeed,
                 autoplay = p.autoplay,
+                autoplayFrom = p.autoplayFrom.name,
+                autoplaySources = AutoplaySource.entries.map { WChoice(it.name, it.displayName, it.description) },
+                avoidRecent = p.autoplayAvoidRecent,
+                keepQueue = p.keepQueue,
                 hybridSearch = DEFAULT_HYBRID_SEARCH.filter { it in p.hybridSearch }.map { it.name },
                 hybridServices = DEFAULT_HYBRID_SEARCH.map { it.name },
                 sleepFade = p.sleepFadeSeconds,

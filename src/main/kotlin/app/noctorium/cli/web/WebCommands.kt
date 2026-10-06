@@ -14,6 +14,7 @@ import app.noctorium.domain.editableOnService
 import app.noctorium.lyrics.LyricsProviderId
 import app.noctorium.playback.RepeatMode
 import app.noctorium.settings.AccentPreset
+import app.noctorium.settings.AutoplaySource
 import app.noctorium.settings.ProgressBarStyle
 import app.noctorium.settings.ThemePreset
 import app.noctorium.settings.TimeDisplay
@@ -92,6 +93,16 @@ class WebCommands(
             "addToQueue" -> command.tracks("tracks").ifEmpty { listOfNotNull(command.track("track")) }.forEach(state::addToQueue)
             "playNext" -> state.playNext(command.track("track") ?: return "No track")
             "clearQueue" -> state.clearQueue()
+            "shuffleUpcoming" -> state.shuffleUpcoming()
+            "clearUpcoming" -> state.clearUpcoming()
+            // Core says how it went, saved or why not, as a library notice.
+            "saveQueue" -> state.saveQueueAsPlaylist(command.string("title")?.takeIf(String::isNotBlank) ?: return "Give the playlist a name first")
+            // Autoplay's songs, by key where the page sends one, so a list that moved on since it was drawn
+            // never plays, keeps or drops the wrong one.
+            "playSuggestion" -> state.playSuggestion(suggestion(command) ?: return GONE)
+            "keepSuggestion" -> state.keepSuggestion(suggestion(command) ?: return GONE)
+            "removeSuggestion" -> state.removeSuggestion(suggestion(command) ?: return GONE)
+            "refreshSuggestions" -> state.refreshSuggestions()
             "openLink" -> state.openLink(command.string("text") ?: return "No link", command.string("action")?.let { LinkAction.valueOf(it.uppercase()) } ?: LinkAction.PLAY)
 
             // --- Finding ---
@@ -212,6 +223,11 @@ class WebCommands(
             // How it plays: the same settings the terminal player's Settings page changes.
             "speed" -> state.setPlaybackSpeed(command.float("value") ?: return "No speed")
             "autoplay" -> state.setAutoplay(command.bool("on") ?: return "On or off?")
+            "autoplayFrom" -> state.setAutoplayFrom(
+                AutoplaySource.entries.firstOrNull { it.name == command.string("source") } ?: return "No such choice",
+            )
+            "avoidRecent" -> state.setAutoplayAvoidRecent(command.bool("on") ?: return "On or off?")
+            "keepQueue" -> state.setKeepQueue(command.bool("on") ?: return "On or off?")
             "sleepFade" -> state.setSleepFade(command.int("seconds") ?: return "No seconds")
             "hybridSearch" -> state.setHybridSearchService(
                 command.string("provider")?.let { name -> ProviderType.entries.firstOrNull { it.name == name } } ?: return "No such service",
@@ -315,6 +331,16 @@ class WebCommands(
 
     private fun onlyItsOwn(provider: ProviderType) = "Only ${provider.displayName} tracks can go into a ${provider.displayName} playlist"
 
+    /**
+     * Where one of autoplay's songs is now: found by its key when the page sends one, or else taken at the
+     * index it was given, while that is still one of them.
+     */
+    private fun suggestion(command: JsonObject): Int? {
+        val suggestions = state.queue.state.value.suggestions
+        command.string("key")?.let { key -> return suggestions.indexOfFirst { it.queueKey == key }.takeIf { it >= 0 } }
+        return command.int("index")?.takeIf { it in suggestions.indices }
+    }
+
     /** A playlist by key, from wherever the page could have seen it. */
     private fun playlist(key: String?): Playlist? {
         key ?: return null
@@ -329,6 +355,9 @@ class WebCommands(
 
 /** The services whose playlists Noctorium makes and changes. */
 private val WRITABLE = setOf(ProviderType.YOUTUBE_MUSIC, ProviderType.YOUTUBE_VIDEO, ProviderType.SOUNDCLOUD)
+
+/** What a command on one of autoplay's songs says when the song has gone since the page drew it. */
+private const val GONE = "That song is no longer lined up"
 
 private fun JsonObject.string(name: String) = this[name]?.let { runCatching { it.jsonPrimitive.contentOrNull }.getOrNull() }
 private fun JsonObject.strings(name: String) = this[name]?.let { element ->

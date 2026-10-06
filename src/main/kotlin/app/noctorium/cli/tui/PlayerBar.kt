@@ -43,8 +43,13 @@ object PlayerBar {
         val rightWidth = if (w >= 110) 30 else if (w >= 80) 18 else 0
         val infoWidth = ((w - left) * 34 / 100).coerceIn(14, 48)
 
-        // The track, or what is happening instead of one.
-        if (track == null) {
+        // The track, or what is happening instead of one: a queue waiting to be played -- the one kept from
+        // last time, put back at launch -- or nothing at all.
+        val waiting = queue.current
+        if (track == null && waiting != null) {
+            canvas.write(left, inner, waiting.title, p.subtext, bg, BOLD, max = infoWidth)
+            if (rows >= 2) canvas.write(left, inner + 1, "Ready in the queue · ${tui.key(KeyAction.PLAY_PAUSE)} plays it", p.faint, bg, max = infoWidth)
+        } else if (track == null) {
             canvas.write(left, inner, "Nothing playing", p.subtext, bg, BOLD, max = infoWidth)
             if (rows >= 2) canvas.write(left, inner + 1, "Find something with ${tui.key(KeyAction.SEARCH)} and press Enter", p.faint, bg, max = infoWidth)
         } else {
@@ -91,7 +96,8 @@ object PlayerBar {
         // Drawn from plain shapes rather than the media symbols, which some terminals turn into wide emoji.
         canvas.write(controlsX + 4, inner, "|◀", p.text, bg)
         canvas.write(controlsX + 8, inner, " $play ", p.onAccent, p.accent, BOLD)
-        canvas.write(controlsX + 14, inner, "▶|", p.text, bg)
+        // Dim where next would go nowhere: the queue's end, with nothing repeating and nothing from autoplay.
+        canvas.write(controlsX + 14, inner, "▶|", if (queue.hasNext) p.text else p.faint, bg)
         canvas.write(controlsX + 19, inner, if (queue.repeatMode == RepeatMode.ONE) "↻1" else "↻", repeatColour, bg, BOLD)
         tui.clickTargets += Tui.ClickTarget(controlsX, inner, 2, 1) { state.toggleShuffle() }
         tui.clickTargets += Tui.ClickTarget(controlsX + 4, inner, 3, 1) { state.previous() }
@@ -132,10 +138,18 @@ object PlayerBar {
             canvas.write(rx + 5 + bars, inner, if (playback.isMuted) "muted" else "${(volume * 100).toInt()}%", p.subtext, bg)
             tui.clickTargets += Tui.ClickTarget(rx + 4, inner, bars, 1) { column -> state.setVolume(((column + 1) / bars.toFloat()).coerceIn(0f, 1f)) }
             if (rows >= 2 && rightWidth >= 26) {
-                val next = queue.tracks.getOrNull(queue.currentIndex + 1)
+                // What next leads to: the queue's next song, its first again when it repeats, autoplay's first
+                // after the end, or Spotify's choice when Spotify carries on by itself.
+                val next = when {
+                    queue.currentIndex + 1 < queue.tracks.size -> "next" to queue.tracks[queue.currentIndex + 1].title
+                    queue.repeatMode == RepeatMode.ALL && queue.tracks.isNotEmpty() -> "next" to queue.tracks.first().title
+                    queue.suggestions.isNotEmpty() -> "auto" to queue.suggestions.first().title
+                    queue.continuesElsewhere -> "next" to "Spotify chooses"
+                    else -> null
+                }
                 if (next != null) {
-                    canvas.write(rx, inner + 1, "next", p.faint, bg)
-                    canvas.write(rx + 5, inner + 1, next.title, p.subtext, bg, max = rightWidth - 6)
+                    canvas.write(rx, inner + 1, next.first, p.faint, bg)
+                    canvas.write(rx + 5, inner + 1, next.second, p.subtext, bg, max = rightWidth - 6)
                 }
                 val connect = state.connect.value
                 val remote = connect.target

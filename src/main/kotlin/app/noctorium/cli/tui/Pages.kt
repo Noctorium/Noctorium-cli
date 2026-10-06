@@ -1,5 +1,6 @@
 package app.noctorium.cli.tui
 
+import app.noctorium.cli.AutoplayState
 import app.noctorium.core.SearchMode
 import app.noctorium.domain.PlaybackOrigin
 import app.noctorium.domain.Playlist
@@ -9,6 +10,7 @@ import app.noctorium.domain.editableOnService
 import app.noctorium.domain.pageUrl
 import app.noctorium.downloads.DownloadStage
 import app.noctorium.lyrics.LyricsProviderStatus
+import app.noctorium.playback.QueueState
 
 /**
  * What each page shows, and what its keys do.
@@ -85,7 +87,15 @@ object Pages {
             }
             Page.QUEUE -> state.queue.state.value.let { q ->
                 if (q.tracks.isEmpty()) null
-                else "${q.tracks.size} tracks · ${k(KeyAction.REMOVE)} remove · ${k(KeyAction.MOVE_DOWN)} ${k(KeyAction.MOVE_UP)} move · ${k(KeyAction.CLEAR_QUEUE)} clear"
+                else listOf(
+                    if (q.tracks.size == 1) "1 track" else "${q.tracks.size} tracks",
+                    "${k(KeyAction.REMOVE)} remove",
+                    "${k(KeyAction.MOVE_DOWN)} ${k(KeyAction.MOVE_UP)} move",
+                    "${k(KeyAction.SHUFFLE_UPCOMING)} shuffle next",
+                    "${k(KeyAction.CLEAR_UPCOMING)} clear next",
+                    "${k(KeyAction.SAVE_QUEUE)} save",
+                    "${k(KeyAction.CLEAR_QUEUE)} clear",
+                ).joinToString(" · ")
             }
             Page.DOWNLOADS -> "${state.downloadState.value.entries.size} kept · Enter play · ${k(KeyAction.REMOVE)} delete"
             Page.DEVICES -> "Noctorium Connect and the web player"
@@ -262,13 +272,91 @@ object Pages {
         if (current + 1 < queue.tracks.size) {
             add(Row.Header("Up next", "${queue.tracks.size - current - 1}"))
             for (i in current + 1 until queue.tracks.size) add(Row.Song(queue.tracks[i], queue.tracks, PlaybackOrigin.QUEUE, number = i - current, queueIndex = i))
+            add(Row.Gap)
         }
+        autoplayRows(tui, queue)
+        // What can be done to the queue as a whole, each with its key.
+        add(Row.Gap)
+        add(Row.Header("The queue"))
+        add(Row.Action("Shuffle what is next", hint = tui.key(KeyAction.SHUFFLE_UPCOMING), run = { shuffleUpcoming(tui) }))
+        add(Row.Action("Clear what is next", hint = tui.key(KeyAction.CLEAR_UPCOMING), run = { clearUpcoming(tui) }))
+        add(Row.Action("Save the queue as a playlist…", hint = tui.key(KeyAction.SAVE_QUEUE), run = { saveQueue(tui) }))
+        add(Row.Action("Clear the queue", hint = tui.key(KeyAction.CLEAR_QUEUE), run = { clearQueue(tui) }))
         if (current > 0) {
             add(Row.Gap)
             add(Row.Header("Played"))
             for (i in 0 until current) add(Row.Song(queue.tracks[i], queue.tracks, PlaybackOrigin.QUEUE, queueIndex = i))
         }
     }
+
+    /**
+     * Autoplay, under the queue: the songs it has lined up, dimmer than the queue's own, or what it is doing
+     * instead -- off, waiting for the queue to be nearly over, looking, or leaving it to Spotify.
+     */
+    private fun MutableList<Row>.autoplayRows(tui: Tui, queue: QueueState) {
+        val k = tui::key
+        val autoplay = AutoplayState.of(queue, tui.state.settings.value.preferences.autoplay)
+        val ready = autoplay == AutoplayState.READY
+        add(Row.Header(listOfNotNull("Autoplay", queue.suggestionsFrom.takeIf { ready }).joinToString(" · "), "${queue.suggestions.size}".takeIf { ready }))
+        when (autoplay) {
+            AutoplayState.READY -> {
+                queue.suggestions.forEachIndexed { i, track -> add(Row.Song(track, queue.suggestions, PlaybackOrigin.QUEUE, suggestion = i)) }
+                add(Row.Note("Enter plays one now · ${k(KeyAction.ADD_TO_QUEUE)} keeps it · ${k(KeyAction.REMOVE)} drops it · ${k(KeyAction.REFRESH_SUGGESTIONS)} looks again"))
+            }
+            AutoplayState.OFF -> add(Row.Note("Off: the queue stops when it runs out. Settings › When the queue runs out turns it on."))
+            AutoplayState.REPEATING -> add(Row.Note("The queue repeats, so it never runs out and autoplay has nothing to add."))
+            AutoplayState.SPOTIFY -> add(Row.Note("Spotify chooses what comes next, in your Spotify app; next asks it to move on."))
+            AutoplayState.WAITING -> add(Row.Note("Looking for songs like the last one…"))
+            AutoplayState.NOTHING -> add(Row.Note("Nothing lined up. ${k(KeyAction.REFRESH_SUGGESTIONS)} looks again."))
+            AutoplayState.LATER -> add(Row.Note("When the queue is nearly over, songs like its last one are lined up here."))
+        }
+    }
+
+    private fun shuffleUpcoming(tui: Tui) {
+        if (tui.state.queue.state.value.upNext.size < 2) return tui.toast("Nothing to shuffle: fewer than two songs are next", Row.Tone.QUIET)
+        tui.state.shuffleUpcoming()
+        tui.toast("Shuffled what is next")
+    }
+
+    private fun clearUpcoming(tui: Tui) {
+        val next = tui.state.queue.state.value.upNext.size
+        if (next == 0) return tui.toast("Nothing is next in the queue", Row.Tone.QUIET)
+        tui.overlays.addLast(
+            Overlay.Confirm("Clear what is next?", if (next == 1) "The song after this one leaves the queue." else "The $next songs after this one leave the queue.") {
+                tui.state.clearUpcoming()
+            },
+        )
+    }
+
+    /** Core says how it went -- saved, or why not -- as a library notice, which arrives as a toast. */
+    private fun saveQueue(tui: Tui) {
+        if (tui.state.queue.state.value.tracks.isEmpty()) return tui.toast("The queue is empty, so there is nothing to save", Row.Tone.QUIET)
+        tui.overlays.addLast(
+            Overlay.Prompt("Save the queue", "A name for the playlist. It is kept in Noctorium on this computer.") { title ->
+                tui.state.saveQueueAsPlaylist(title)
+            },
+        )
+    }
+
+    /**
+     * Forgets autoplay's songs so they are looked for again: at once when the queue is nearly over, which is
+     * when core looks, or else once it is. Off or repeating, it says why nothing would come.
+     */
+    private fun refreshSuggestions(tui: Tui) {
+        val queue = tui.state.queue.state.value
+        when (AutoplayState.of(queue, tui.state.settings.value.preferences.autoplay)) {
+            AutoplayState.OFF -> tui.toast("Autoplay is off: Settings › When the queue runs out turns it on", Row.Tone.QUIET)
+            AutoplayState.REPEATING -> tui.toast("The queue repeats, so autoplay has nothing to add", Row.Tone.QUIET)
+            else -> {
+                tui.state.refreshSuggestions()
+                val nearEnd = queue.tracks.isNotEmpty() && queue.currentIndex >= queue.tracks.lastIndex - 1
+                tui.toast(if (nearEnd) "Looking again for songs like the last one…" else "Autoplay looks again once the queue is nearly over")
+            }
+        }
+    }
+
+    private fun clearQueue(tui: Tui) =
+        tui.overlays.addLast(Overlay.Confirm("Clear the queue?", "Playback stops too.") { tui.state.clearQueue() })
 
     private fun downloadRows(tui: Tui): List<Row> = buildList {
         val downloads = tui.state.downloadState.value
@@ -432,8 +520,15 @@ object Pages {
             // The playlist key on a playlist does nothing, rather than reaching whatever is bound everywhere.
             if (row is Row.PlaylistItem && keys.matches(input.char, KeyAction.ADD_TO_PLAYLIST)) return true
             if (tui.page == Page.LIBRARY && Tracks.playlistKeys(tui, input.char)) return true
-            if (tui.page == Page.QUEUE && keys.matches(input.char, KeyAction.CLEAR_QUEUE)) {
-                tui.overlays.addLast(Overlay.Confirm("Clear the queue?", "Playback stops too.") { tui.state.clearQueue() })
+            if (tui.page == Page.QUEUE) {
+                when (keys.action(input.char, KeyScope.QUEUE)) {
+                    KeyAction.CLEAR_QUEUE -> clearQueue(tui)
+                    KeyAction.SHUFFLE_UPCOMING -> shuffleUpcoming(tui)
+                    KeyAction.CLEAR_UPCOMING -> clearUpcoming(tui)
+                    KeyAction.SAVE_QUEUE -> saveQueue(tui)
+                    KeyAction.REFRESH_SUGGESTIONS -> refreshSuggestions(tui)
+                    else -> return false
+                }
                 return true
             }
             if (tui.page == Page.DOWNLOADS && keys.matches(input.char, KeyAction.DELETE_ALL_DOWNLOADS)) {
@@ -492,6 +587,8 @@ object Tracks {
     fun play(tui: Tui, row: Row.Song) {
         val state = tui.state
         when {
+            // One of autoplay's songs: it and those before it join the queue, and it plays.
+            row.suggestion != null -> state.playSuggestion(row.suggestion)
             row.queueIndex != null -> state.jumpToQueueItem(row.queueIndex)
             row.inPlaylist != null -> state.playPlaylist(row.inPlaylist, startAt = row.track)
             row.inLocalPlaylist != null -> state.playLocalPlaylist(row.inLocalPlaylist, startAt = row.track)
@@ -503,7 +600,20 @@ object Tracks {
     fun handle(tui: Tui, row: Row.Song, key: String): Boolean {
         val state = tui.state
         val track = row.track
-        when (tui.keys.action(key, KeyScope.TRACK)) {
+        val action = tui.keys.action(key, KeyScope.TRACK)
+        // One of autoplay's songs is not in the queue yet: adding it keeps it there, taking it out drops it, and
+        // the rest keep autoplay's order.
+        if (row.suggestion != null) when (action) {
+            KeyAction.ADD_TO_QUEUE -> { state.keepSuggestion(row.suggestion); tui.toast("Kept in the queue: ${track.title}"); return true }
+            KeyAction.PLAY_NEXT -> { state.removeSuggestion(row.suggestion); state.playNext(track); tui.toast("Playing next: ${track.title}"); return true }
+            KeyAction.REMOVE -> { state.removeSuggestion(row.suggestion); return true }
+            KeyAction.MOVE_DOWN, KeyAction.MOVE_UP -> {
+                tui.toast("Autoplay's songs keep their order; ${tui.key(KeyAction.ADD_TO_QUEUE)} keeps one in the queue", Row.Tone.QUIET)
+                return true
+            }
+            else -> Unit
+        }
+        when (action) {
             KeyAction.ADD_TO_QUEUE -> { state.addToQueue(track); tui.toast("Added to the queue: ${track.title}") }
             KeyAction.PLAY_NEXT -> { state.playNext(track); tui.toast("Playing next: ${track.title}") }
             KeyAction.LIKE -> tui.like(track)

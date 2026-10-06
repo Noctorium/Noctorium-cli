@@ -13,6 +13,7 @@ import app.noctorium.playback.ToolOrigin
 import app.noctorium.settings.AccentPreset
 import app.noctorium.settings.EqualizerPreset
 import app.noctorium.settings.AccountConnectionStatus
+import app.noctorium.settings.AutoplaySource
 import app.noctorium.settings.ProgressBarStyle
 import app.noctorium.settings.ScrobbleConnectionStatus
 import app.noctorium.settings.DEFAULT_HYBRID_SEARCH
@@ -275,6 +276,29 @@ object Settings {
                 "When the queue runs out",
                 value = if (preferences.autoplay) "Carry on with songs like the last" else "Stop",
                 step = { state.setAutoplay(!preferences.autoplay) },
+            ),
+        )
+        // Where autoplay's songs come from, and which it leaves out; both shown with autoplay off too, so they
+        // are set before it is switched on.
+        add(
+            Row.Action(
+                "Autoplay draws from",
+                value = preferences.autoplayFrom.displayName,
+                step = { by -> state.setAutoplayFrom(cycle(AutoplaySource.entries, preferences.autoplayFrom, by)) },
+            ),
+        )
+        add(
+            Row.Action(
+                "Autoplay skips songs played lately",
+                value = onOff(preferences.autoplayAvoidRecent),
+                step = { state.setAutoplayAvoidRecent(!preferences.autoplayAvoidRecent) },
+            ),
+        )
+        add(
+            Row.Action(
+                "Keep the queue between launches",
+                value = if (preferences.keepQueue) "On: it is back where it was left" else "Off",
+                step = { state.setKeepQueue(!preferences.keepQueue) },
             ),
         )
         add(

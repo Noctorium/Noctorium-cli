@@ -19,6 +19,7 @@ import app.noctorium.playback.PlaybackTool
 import app.noctorium.playback.PlaybackToolInstaller
 import app.noctorium.playback.ToolOrigin
 import app.noctorium.settings.AccountConnectionStatus
+import app.noctorium.settings.AutoplaySource
 import app.noctorium.settings.NoctoriumPreferences
 import app.noctorium.settings.ScrobbleConnectionStatus
 import app.noctorium.settings.SettingsRepository
@@ -73,6 +74,10 @@ object Commands {
         |  noctorium settings            how it plays; and to change one:
         |      speed <0.5–2>               slower or faster, keeping the pitch
         |      autoplay <on|off>           carry on with songs like the last when the queue runs out
+        |      autoplay-from <same|youtube>
+        |                                  from the last song's own service, or YouTube Music's radio
+        |      avoid-recent <on|off>       autoplay leaves out songs played lately
+        |      keep-queue <on|off>         the queue is kept when Noctorium closes, and picked up again
         |      fade <off|seconds>          how long a sleep timer fades out for
         |      hybrid <service> <on|off>   whether a search of every service asks this one
         |  noctorium status              accounts, tools and where things are kept
@@ -118,7 +123,9 @@ object Commands {
 
     private fun parts(): CliParts = CliParts()
 
-    private fun state(parts: CliParts, engine: app.noctorium.playback.PlaybackEngine) = cliAppState(parts, engine)
+    /** One command's AppState: the player and `noctorium web` are [interactive]; see [cliAppState]. */
+    private fun state(parts: CliParts, engine: app.noctorium.playback.PlaybackEngine, interactive: Boolean = false) =
+        cliAppState(parts, engine, interactive)
 
     private fun player(startWith: String?): Int {
         // Started from a menu or a shortcut rather than a terminal, there is nowhere to draw the player, and
@@ -135,7 +142,7 @@ object Commands {
         // Whatever an interrupted update left beside the folder, cleared before anything else is started.
         runCatching { parts.updates.installer.tidy() }
         val engine = WebPlayer.engineFor(parts, preferBrowser = false)
-        val state = state(parts, engine)
+        val state = state(parts, engine, interactive = true)
         val web = WebPlayer(state, parts, engine)
         return try {
             val tui = Tui(state, parts, web.asSwitch(), startWith)
@@ -229,7 +236,7 @@ object Commands {
         if (!ensureTools(quiet = false)) return 1
         runCatching { parts.updates.installer.tidy() }
         val engine = WebPlayer.engineFor(parts, preferBrowser = true)
-        val state = state(parts, engine)
+        val state = state(parts, engine, interactive = true)
         val web = WebPlayer(state, parts, engine)
         val out = Out()
         val problem = web.start(port, network)
@@ -595,6 +602,28 @@ object Commands {
                     state.setAutoplay(on)
                     saved { it.autoplay == on }
                 }
+                "autoplay-from" -> {
+                    val source = when (value) {
+                        "same", "same-service" -> AutoplaySource.SAME_SERVICE
+                        "youtube", "youtube-music", "ytm" -> AutoplaySource.YOUTUBE_MUSIC
+                        else -> { System.err.println("autoplay-from same, or autoplay-from youtube"); return 2 }
+                    }
+                    state.setAutoplayFrom(source)
+                    saved { it.autoplayFrom == source }
+                }
+                "avoid-recent" -> {
+                    val on = onOrOff(value) ?: run { System.err.println("avoid-recent on, or avoid-recent off"); return 2 }
+                    state.setAutoplayAvoidRecent(on)
+                    saved { it.autoplayAvoidRecent == on }
+                }
+                "keep-queue" -> {
+                    val on = onOrOff(value) ?: run { System.err.println("keep-queue on, or keep-queue off"); return 2 }
+                    state.setKeepQueue(on)
+                    // Off forgets the kept queue at once. This command's AppState keeps no queue of its own (see
+                    // cliAppState), so the one the player keeps is forgotten here.
+                    if (!on) keptQueue(interactive = true).clear()
+                    saved { it.keepQueue == on }
+                }
                 "fade" -> {
                     val seconds = if (value == "off" || value == "no") 0 else value?.removeSuffix("s")?.toIntOrNull()
                     if (seconds == null || seconds < 0) { System.err.println("fade off, or fade with a number of seconds such as 30"); return 2 }
@@ -614,12 +643,24 @@ object Commands {
                     if ((service in kept) != on) println("  ${out.warn("!")} At least one service has to answer a search.")
                     saved { it.hybridSearch == kept }
                 }
-                else -> { System.err.println("There is no setting called $what here: speed, autoplay, fade or hybrid."); return 2 }
+                else -> {
+                    System.err.println("There is no setting called $what here: speed, autoplay, autoplay-from, avoid-recent, keep-queue, fade or hybrid.")
+                    return 2
+                }
             }
             val preferences = state.settings.value.preferences
             fun line(name: String, value: String) = println("  ${name.padEnd(20)} $value")
             line("Speed", Settings.speedName(preferences.playbackSpeed))
             line("Autoplay", if (preferences.autoplay) "on: the queue carries on with songs like the last" else "off")
+            line(
+                "Autoplay from",
+                when (preferences.autoplayFrom) {
+                    AutoplaySource.SAME_SERVICE -> "same: the last song's own service"
+                    AutoplaySource.YOUTUBE_MUSIC -> "youtube: YouTube Music's radio, whatever the song"
+                },
+            )
+            line("Avoid recent", if (preferences.autoplayAvoidRecent) "on: autoplay leaves out songs played lately" else "off")
+            line("Keep the queue", if (preferences.keepQueue) "on: it is picked up where it was left" else "off")
             line("Sleep timer fade", if (preferences.sleepFadeSeconds <= 0) "off" else "${preferences.sleepFadeSeconds} seconds")
             line(
                 "Hybrid search asks",

@@ -27,6 +27,9 @@ noctorium web                   the web player, for any browser on your network
   in your own Spotify app, wherever it is open.
 - **Made yours.** The speed, from half to double; carrying on with similar songs when the queue runs out;
   which services a search of all of them asks; a sleep timer that fades out; and every key.
+- **A queue that keeps.** What autoplay will carry on with is shown under the queue, from the last song's own
+  service or YouTube Music's radio, to play, keep or drop. What is next can be shuffled or cleared, the queue
+  saved as a playlist, and it is still there, where it was left, the next time the player starts.
 - **Your real accounts.** Likes go to the service; playlists are made, renamed, reordered, made public or
   private and deleted there.
 - **Synced lyrics** from eight sources, lit up line by line as they are sung, with the source switched
@@ -107,7 +110,8 @@ may ask you to confirm it is you, or freeze an account it thinks is automated; i
 Many songs do not play outside Russia, and VK's songs cannot be downloaded.
 
 `noctorium settings` shows how it plays, and changes it: `noctorium settings speed 1.25`, `autoplay off`,
-`fade 30`, `hybrid vk off`.
+`autoplay-from youtube` (or `same`, the song's own service), `avoid-recent off`, `keep-queue off`, `fade 30`,
+`hybrid vk off`.
 
 ## The keys
 
@@ -124,6 +128,8 @@ As they come; Settings › Keys changes any of them, and `?` always lists them a
 | `<` `>` | Slower, faster |
 | `s` `r` | Shuffle, repeat |
 | `a` `A` `P` | Add to the queue, play next, add to a playlist |
+| `S` `U` `N` | On the Queue page: shuffle what is next, clear it, save the queue as a playlist |
+| `a` `x` `R` | On autoplay's songs under the queue: keep one, drop one, look again |
 | `l` `d` | Like on the real account, download to keep |
 | `t` | The next theme |
 | `w` | Start the web player |
@@ -149,8 +155,9 @@ streams to the addresses of the big hosting companies, and serves yours. The pag
 
 In the desktop's data folder, under `cli/` — `%LOCALAPPDATA%\Noctorium\cli` on Windows,
 `~/Library/Application Support/Noctorium/cli` on a Mac, `~/.local/share/noctorium/cli` on Linux — with its
-own settings, so the two never write over each other. mpv and yt-dlp the desktop already downloaded are used
-rather than fetched again. Secrets (Spotify, Last.fm, VK's session) go to DPAPI on Windows, the Keychain on a
+own settings, so the two never write over each other. The queue is kept there between launches, in
+`queue.json`, by the player and `noctorium web`; the other commands leave it alone. mpv and yt-dlp the desktop
+already downloaded are used rather than fetched again. Secrets (Spotify, Last.fm, VK's session) go to DPAPI on Windows, the Keychain on a
 Mac and the desktop keyring through `secret-tool` on Linux; on a machine with no keyring they are kept for the
 session only, never written to a file.
 

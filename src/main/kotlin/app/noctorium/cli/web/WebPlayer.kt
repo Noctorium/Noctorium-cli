@@ -175,6 +175,8 @@ class WebPlayer(
         player.output.marks("playback")
         state.sleepTimer.marks("playback")
         state.queue.state.marks("queue")
+        // The queue's part says what autoplay is doing, which depends on the setting as well as on the queue.
+        state.settings.map { it.preferences.autoplay }.distinctUntilChanged().marks("queue")
         state.ui.marks("home", "search")
         state.library.marks("library")
         state.likes.marks("likes")
@@ -189,7 +191,9 @@ class WebPlayer(
             state.playback.map { it.status to it.track?.queueKey }.distinctUntilChanged().collect { (status, _) ->
                 if (status != app.noctorium.playback.PlaybackStatus.PLAYING || player.output.value != Output.BROWSER) return@collect
                 val queue = state.queue.state.value
-                queue.tracks.getOrNull(queue.currentIndex + 1)?.let(player.browser::prefetch)
+                // At the queue's end, whatever an advance would play there: its first again, or autoplay's first.
+                (queue.tracks.getOrNull(queue.currentIndex + 1) ?: queue.upcoming?.takeIf { it.queueKey != queue.current?.queueKey })
+                    ?.let(player.browser::prefetch)
             }
         }
         // Messages core wants shown, passed to every page as a passing notice.
@@ -324,7 +328,7 @@ class WebPlayer(
         player.browser.sink = { message -> connection.send(message.toString()) }
     }
 
-    private val starts = setOf("play", "playPlaylist", "playLocal", "playDownloads", "toggle", "jump", "next", "previous", "seek", "openLink")
+    private val starts = setOf("play", "playPlaylist", "playLocal", "playDownloads", "playSuggestion", "toggle", "jump", "next", "previous", "seek", "openLink")
 
     private fun received(connection: Connection, message: JsonObject) {
         when (message["kind"]?.jsonPrimitive?.contentOrNull) {

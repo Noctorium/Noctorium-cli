@@ -3,6 +3,7 @@ package app.noctorium.cli.tui
 import app.noctorium.cli.tui.KeyAction.ADD_TO_PLAYLIST
 import app.noctorium.cli.tui.KeyAction.ADD_TO_QUEUE
 import app.noctorium.cli.tui.KeyAction.CLEAR_QUEUE
+import app.noctorium.cli.tui.KeyAction.CLEAR_UPCOMING
 import app.noctorium.cli.tui.KeyAction.COPY_LINK
 import app.noctorium.cli.tui.KeyAction.DELETE_ALL_DOWNLOADS
 import app.noctorium.cli.tui.KeyAction.DELETE_PLAYLIST
@@ -28,13 +29,16 @@ import app.noctorium.cli.tui.KeyAction.PLAY_PAUSE
 import app.noctorium.cli.tui.KeyAction.PREVIOUS
 import app.noctorium.cli.tui.KeyAction.QUIT
 import app.noctorium.cli.tui.KeyAction.REFRESH_HOME
+import app.noctorium.cli.tui.KeyAction.REFRESH_SUGGESTIONS
 import app.noctorium.cli.tui.KeyAction.REMOVE
 import app.noctorium.cli.tui.KeyAction.RENAME_PLAYLIST
 import app.noctorium.cli.tui.KeyAction.REPEAT
 import app.noctorium.cli.tui.KeyAction.SAVE_MP3
+import app.noctorium.cli.tui.KeyAction.SAVE_QUEUE
 import app.noctorium.cli.tui.KeyAction.SEARCH
 import app.noctorium.cli.tui.KeyAction.SHUFFLE
 import app.noctorium.cli.tui.KeyAction.SHUFFLE_PLAYLIST
+import app.noctorium.cli.tui.KeyAction.SHUFFLE_UPCOMING
 import app.noctorium.cli.tui.KeyAction.SLEEP_TIMER
 import app.noctorium.cli.tui.KeyAction.SLOWER
 import app.noctorium.cli.tui.KeyAction.THEME_NEXT
@@ -70,7 +74,9 @@ class KeyMapTest {
         assertEquals(REFRESH_HOME, keys.action("R", KeyScope.HOME))
         mapOf("N" to NEW_PLAYLIST, "S" to SHUFFLE_PLAYLIST, "R" to RENAME_PLAYLIST, "V" to PLAYLIST_VISIBILITY, "D" to DELETE_PLAYLIST)
             .forEach { (key, action) -> assertEquals(action, keys.action(key, KeyScope.LIBRARY), "'$key'") }
-        assertEquals(CLEAR_QUEUE, keys.action("C", KeyScope.QUEUE))
+        // The queue's own: Clear, and four new ones on capitals the Library also uses, a page it never meets.
+        mapOf("C" to CLEAR_QUEUE, "S" to SHUFFLE_UPCOMING, "U" to CLEAR_UPCOMING, "N" to SAVE_QUEUE, "R" to REFRESH_SUGGESTIONS)
+            .forEach { (key, action) -> assertEquals(action, keys.action(key, KeyScope.QUEUE), "'$key'") }
         assertEquals(DELETE_ALL_DOWNLOADS, keys.action("X", KeyScope.DOWNLOADS))
         mapOf("[" to LYRICS_PREVIOUS, "]" to LYRICS_NEXT, "R" to LYRICS_AGAIN, "f" to FOLLOW_ARTIST)
             .forEach { (key, action) -> assertEquals(action, keys.action(key, KeyScope.NOW_PLAYING), "'$key'") }
@@ -83,13 +89,28 @@ class KeyMapTest {
     }
 
     @Test
+    fun `the queue's keys move like any other, never onto one the queue or a track already has`() {
+        assertEquals(REFRESH_SUGGESTIONS, keys.clash(CLEAR_UPCOMING, "R"))
+        assertEquals(ADD_TO_QUEUE, keys.clash(SAVE_QUEUE, "a"), "a track's keys work on the queue too")
+        assertEquals(NEXT, keys.clash(SHUFFLE_UPCOMING, "n"))
+        // The Library's D is never reached from the queue.
+        assertNotNull(keys.with(SAVE_QUEUE, "D"))
+
+        val moved = assertNotNull(keys.with(SHUFFLE_UPCOMING, "W"))
+        assertEquals(SHUFFLE_UPCOMING, moved.action("W", KeyScope.QUEUE))
+        assertNull(moved.action("S", KeyScope.QUEUE))
+        assertEquals(SHUFFLE_PLAYLIST, moved.action("S", KeyScope.LIBRARY), "the Library keeps its own S")
+        assertEquals(mapOf("SHUFFLE_UPCOMING" to listOf("W")), moved.saved())
+    }
+
+    @Test
     fun `a key that would meet another's is refused, a key on another page is not, and a change can be put back`() {
         assertEquals(PREVIOUS, keys.clash(NEXT, "p"))
         assertNull(keys.with(NEXT, "p"))
         // A track's keys work on every page, so the R of Home, Library and Now playing is taken for them.
         assertNull(keys.with(DOWNLOAD, "R"))
-        // The queue and the pages that use R never meet.
-        assertNotNull(keys.with(CLEAR_QUEUE, "R"))
+        // Downloads and the pages that use R never meet.
+        assertNotNull(keys.with(DELETE_ALL_DOWNLOADS, "R"))
         assertNull(keys.with(NEXT, "^c"), "a control key is not a key that can be given")
 
         val moved = assertNotNull(keys.with(NEXT, "j"))

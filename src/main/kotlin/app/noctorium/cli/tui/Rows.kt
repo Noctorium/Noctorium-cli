@@ -7,6 +7,8 @@ import app.noctorium.domain.PlaybackOrigin
 import app.noctorium.domain.ProviderType
 import app.noctorium.domain.Track
 import app.noctorium.playlists.LocalPlaylist
+import app.noctorium.spotify.isSpotifyAlbum
+import app.noctorium.spotify.isSpotifyArtist
 
 /** One line of a list page. Headers and notes are drawn but skipped over by the selection. */
 sealed interface Row {
@@ -36,6 +38,11 @@ sealed interface Row {
         val inPlaylist: Playlist? = null,
         val inLocalPlaylist: LocalPlaylist? = null,
         val playlistIndex: Int? = null,
+        /**
+         * Where it is among autoplay's songs, for one of those: lined up after the queue but not in it until it
+         * plays or is kept. Drawn dimmer, and played, kept and dropped as autoplay's.
+         */
+        val suggestion: Int? = null,
     ) : Row
 
     data class PlaylistItem(val playlist: Playlist) : Row
@@ -128,10 +135,9 @@ enum class ListKind { ARTIST, ALBUM, PLAYLIST }
 val Playlist.kind: ListKind
     get() = when {
         BandcampMusicProvider.isArtist(this) -> ListKind.ARTIST
-        // Core's own names for these, SpotifyClient.ARTIST_PREFIX and ALBUM_PREFIX, are not visible from here.
-        provider == ProviderType.SPOTIFY && id.startsWith("artist:") -> ListKind.ARTIST
+        isSpotifyArtist() -> ListKind.ARTIST
         provider == ProviderType.BANDCAMP && (id.startsWith("${BandcampMusicProvider.ALBUM}:") || id.startsWith("${BandcampMusicProvider.TRACK}:")) -> ListKind.ALBUM
-        provider == ProviderType.SPOTIFY && id.startsWith("album:") -> ListKind.ALBUM
+        isSpotifyAlbum() -> ListKind.ALBUM
         else -> ListKind.PLAYLIST
     }
 
@@ -239,7 +245,9 @@ class ListView(private val palette: () -> Palette, private val state: AppState) 
 
     private fun song(canvas: Canvas, p: Palette, row: Row.Song, playing: Boolean, liked: Boolean, background: Rgb?, x: Int, y: Int, w: Int) {
         val track = row.track
-        val titleColour = if (playing) p.accent else p.text
+        // Autoplay's songs are offered rather than chosen, and look it.
+        val titleColour = if (playing) p.accent else if (row.suggestion != null) p.subtext else p.text
+        val artistColour = if (row.suggestion != null) p.faint else p.subtext
         canvas.write(x + 1, y, if (playing) "▶" else " ", p.accent, background, BOLD)
         val numberWidth = if (row.number != null) 4 else 0
         row.number?.let { canvas.write(x + 3, y, it.toString().padStart(3), p.faint, background) }
@@ -249,9 +257,9 @@ class ListView(private val palette: () -> Palette, private val state: AppState) 
         val titleRoom = if (room > 40) room * 58 / 100 else room
         val written = canvas.write(textX, y, track.title, titleColour, background, if (playing) BOLD else 0, max = titleRoom)
         if (room > 40) {
-            canvas.write(textX + titleRoom + 2, y, track.artistLine, p.subtext, background, max = room - titleRoom - 2)
+            canvas.write(textX + titleRoom + 2, y, track.artistLine, artistColour, background, max = room - titleRoom - 2)
         } else if (written < room - 4) {
-            canvas.write(textX + written + 1, y, "· " + track.artistLine, p.subtext, background, max = room - written - 1)
+            canvas.write(textX + written + 1, y, "· " + track.artistLine, artistColour, background, max = room - written - 1)
         }
         val rx = x + w - right
         canvas.write(rx, y, track.provider.badge(), p.badgeColour(track.provider), background, BOLD)
