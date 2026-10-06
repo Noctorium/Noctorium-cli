@@ -228,6 +228,36 @@ class LooksTest {
     }
 
     @Test
+    fun `every layout draws in every kind of theme, from the smallest screen the player allows to a large one`() {
+        playing()
+        val dialogs = listOf(
+            Overlay.Help,
+            Overlay.Confirm("Clear the queue?", "Playback stops too.") {},
+            Overlay.Prompt("Rename", "A new name.", "Night drive") {},
+            Overlay.Picker("Sleep timer", listOf("In 15 minutes" to {}, "At the end of this track" to {}), "A note"),
+            Overlay.Checklist("Hybrid search asks", listOf("YouTube Music", "Bandcamp"), listOf(1), "A note") {},
+        )
+        for (theme in listOf(ThemePreset.NOCTORIUM_NIGHT, ThemePreset.CATPPUCCIN_LATTE, ThemePreset.WINDOWS_98, ThemePreset.WINDOWS_XP)) {
+            theme(theme)
+            for (bar in TuiPlayerBar.entries) for (layout in TuiNowPlaying.entries) {
+                tui.preferences.playerBar = bar
+                tui.preferences.nowPlaying = layout
+                for ((w, h) in listOf(40 to 12, 61 to 19, 97 to 33, 220 to 70)) {
+                    for (page in Page.entries) {
+                        tui.page = page
+                        tui.frame(w, h)
+                    }
+                    dialogs.forEach { dialog ->
+                        tui.overlays.addLast(dialog)
+                        tui.frame(w, h)
+                        tui.overlays.clear()
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     fun `big type has every glyph whole in both sizes, and sets what it can`() {
         assertEquals(BigType.LARGE.keys, BigType.SMALL.keys)
         for ((size, glyphs) in listOf(BigType.Size.LARGE to BigType.LARGE, BigType.Size.SMALL to BigType.SMALL)) {

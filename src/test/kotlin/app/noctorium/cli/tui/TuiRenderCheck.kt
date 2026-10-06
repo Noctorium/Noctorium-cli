@@ -154,8 +154,10 @@ class TuiRenderCheck {
                     tui.page = page
                     write(folder, "$name-${page.name.lowercase().replace('_', '-')}", tui)
                 }
-                tui.preferences.nowPlaying = TuiNowPlaying.LYRICS
-                write(folder, "$name-now-lyrics", tui)
+                for (layout in listOf(TuiNowPlaying.LYRICS, TuiNowPlaying.BIG_TYPE, TuiNowPlaying.COVER)) {
+                    tui.preferences.nowPlaying = layout
+                    write(folder, "$name-now-${layout.name.lowercase().replace('_', '-')}", tui)
+                }
                 tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
                 tui.page = Page.SETTINGS
                 tui.list(Page.SETTINGS.name).selected = Settings.rows(tui).indexOfFirst { it is Row.Action && it.label == "Seek bar" }
@@ -173,10 +175,15 @@ class TuiRenderCheck {
                 tui.overlays.addLast(Overlay.Help)
                 write(folder, "$name-help", tui)
                 tui.overlays.clear()
+                tui.overlays.addLast(Overlay.Checklist("Hybrid search asks", listOf("YouTube Music", "SoundCloud", "Bandcamp", "Spotify", "VK Music"), listOf(0, 2), "Spotify only while its songs play on Spotify") {})
+                write(folder, "$name-checklist", tui)
+                tui.overlays.clear()
                 tui.toast("Theme: Windows ${theme.displayName}")
                 tui.preferences.playerBar = TuiPlayerBar.TASKBAR
                 write(folder, "$name-taskbar", tui)
                 write(folder, "$name-taskbar-narrow", tui, 84, 24)
+                tui.preferences.playerBar = TuiPlayerBar.COMPACT
+                write(folder, "$name-compact", tui)
                 tui.preferences.playerBar = TuiPlayerBar.FULL
                 tui.page = Page.HOME
                 write(folder, "$name-home-narrow", tui, 90, 30)

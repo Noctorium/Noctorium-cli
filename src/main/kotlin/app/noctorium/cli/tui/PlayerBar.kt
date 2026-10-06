@@ -222,14 +222,16 @@ object PlayerBar {
         volume(tui, canvas, trayX + 1, row, trayBg, p.accent, if (theme.skinned) p.line else p.faint)
         tray(tui, canvas, trayX + VOLUME_BARS + 4, row, clock, p, trayBg)
 
-        // The song's button, then the seek bar across what is left between it and the tray.
-        val buttonW = (w * 24 / 100).coerceIn(10, 42)
+        // The song's button, then the seek bar across what is left between it and the tray -- each left out
+        // rather than drawn over the tray when a narrow terminal has no room for it.
+        val buttonW = (w * 24 / 100).coerceIn(10, 42).coerceAtMost(trayX - 1 - left)
+        if (buttonW < 8) return
         val pressed = playback.status == PlaybackStatus.PLAYING
         val face = taskButton(canvas, theme, left, row, buttonW, pressed, bg)
         trackLine(tui, canvas, left + 1, row, buttonW - 2, face, ink = p)
         tui.clickTargets += Tui.ClickTarget(left, row, buttonW, 1) { state.togglePlayback() }
         val seekX = left + buttonW + 1
-        seek(tui, canvas, seekX, row, trayX - 1 - seekX, bg, roomAbove = false, ink = p)
+        if (trayX - 1 - seekX >= 18) seek(tui, canvas, seekX, row, trayX - 1 - seekX, bg, roomAbove = false, ink = p)
     }
 
     /**
