@@ -2,17 +2,13 @@ package app.noctorium.cli.tui
 
 import app.noctorium.playback.PlaybackStatus
 import app.noctorium.playback.RepeatMode
-import app.noctorium.settings.ProgressBarStyle
 import app.noctorium.settings.TimeDisplay
-import kotlin.math.PI
-import kotlin.math.sin
 
 /**
  * The bar along the foot of the screen: the cover, the track, the controls and the seek bar.
  *
- * The seek bar is drawn in whichever of the desktop's six styles is chosen there -- they are one setting
- * across every Noctorium -- in the nearest a terminal gets: a hairline with a dot, the wave travelling while
- * the music does, the segments, the capsule, the classic blocks. Clicking it seeks.
+ * The seek bar is drawn by [SeekBars], in whichever style is chosen -- one setting across every Noctorium.
+ * Clicking it seeks.
  */
 object PlayerBar {
     fun draw(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int, h: Int, cover: Art.Pixels?) {
@@ -115,7 +111,10 @@ object PlayerBar {
             val barW = (middleWidth - 13).coerceAtLeast(4)
             canvas.writeRight(barX - 1, seekY, elapsed, p.subtext, bg)
             val fraction = if (playback.durationMs > 0) (playback.positionMs.toFloat() / playback.durationMs).coerceIn(0f, 1f) else 0f
-            seekBar(canvas, p, preferences.progressBarStyle, barX, seekY, barW, fraction, playback.status == PlaybackStatus.PLAYING, bg)
+            SeekBars.draw(
+                canvas, p, preferences.progressBarStyle, barX, seekY, barW, fraction, playback.status == PlaybackStatus.PLAYING, bg,
+                seed = track?.queueKey.orEmpty(), durationMs = playback.durationMs, roomAbove = rows >= 3,
+            )
             canvas.write(barX + barW + 1, seekY, total, p.subtext, bg)
             if (playback.durationMs > 0) {
                 tui.clickTargets += Tui.ClickTarget(barX, seekY, barW, 1) { column ->
@@ -162,45 +161,6 @@ object PlayerBar {
                     }
                     line?.let { canvas.write(rx, inner + 2, it, p.faint, bg, max = rightWidth - 1) }
                 }
-            }
-        }
-    }
-
-    fun seekBar(canvas: Canvas, p: Palette, style: ProgressBarStyle, x: Int, y: Int, w: Int, fraction: Float, moving: Boolean, bg: Rgb) {
-        val head = (fraction * (w - 1)).toInt().coerceIn(0, w - 1)
-        val unplayed = p.line
-        when (style) {
-            ProgressBarStyle.MINIMAL, ProgressBarStyle.MATERIAL -> {
-                for (i in 0 until w) canvas.set(x + i, y, if (i < head) "━" else "─", if (i < head) p.accent else unplayed, bg)
-                canvas.set(x + head, y, if (style == ProgressBarStyle.MATERIAL) "◉" else "●", p.accent, bg, BOLD)
-            }
-            ProgressBarStyle.WAVE -> {
-                val phase = if (moving) (System.currentTimeMillis() % 1600L) / 1600.0 * 2 * PI else 0.0
-                val levels = "▁▂▃▄▅▆▇"
-                for (i in 0 until w) {
-                    if (i < head) {
-                        val v = (sin(i * .9 - phase) + 1) / 2
-                        canvas.set(x + i, y, levels[(v * (levels.length - 1)).toInt()].toString(), p.accent, bg)
-                    } else {
-                        canvas.set(x + i, y, "─", unplayed, bg)
-                    }
-                }
-                canvas.set(x + head, y, "●", p.accent, bg, BOLD)
-            }
-            ProgressBarStyle.SEGMENTS -> {
-                for (i in 0 until w) {
-                    val segment = i % 3 != 2
-                    canvas.set(x + i, y, if (segment) "▬" else " ", if (i <= head) p.accent else unplayed, bg)
-                }
-            }
-            ProgressBarStyle.CAPSULE -> {
-                for (i in 0 until w) canvas.set(x + i, y, if (i <= head) "█" else "░", if (i <= head) p.accent else unplayed, bg)
-            }
-            ProgressBarStyle.CLASSIC -> {
-                canvas.set(x, y, "▕", unplayed, bg)
-                for (i in 1 until w - 1) canvas.set(x + i, y, if (i < head && i % 2 == 1) "█" else if (i < head) "▌" else " ", p.accent, mix(bg.takeIf { it != DEFAULT } ?: 0, 0xFFFFFF, .06f))
-                canvas.set(x + w - 1, y, "▏", unplayed, bg)
-                canvas.set(x + head.coerceIn(1, w - 2), y, "▐", 0xC0C0C0, bg, BOLD)
             }
         }
     }

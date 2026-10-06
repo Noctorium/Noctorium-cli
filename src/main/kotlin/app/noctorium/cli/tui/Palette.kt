@@ -2,8 +2,10 @@ package app.noctorium.cli.tui
 
 import app.noctorium.settings.AccentPreset
 import app.noctorium.settings.NoctoriumPreferences
+import app.noctorium.settings.ThemeSkin
 import app.noctorium.settings.resolvedAccent
 import app.noctorium.settings.themeColours
+import app.noctorium.settings.themeSkin
 
 /**
  * The theme, in terminal colours.
@@ -12,6 +14,8 @@ import app.noctorium.settings.themeColours
  * Catppuccin in a terminal too, and Windows 98 is still grey -- and the same accent choice, including
  * "Match the artwork", which here follows the cover drawn in the player bar. [ownBackground] leaves the page
  * the terminal's own colour, for anybody whose terminal has a background they chose on purpose.
+ *
+ * The two Windows themes are drawn as themselves as well, by their [skin]: see [Skin].
  */
 data class Palette(
     val page: Rgb,
@@ -21,7 +25,11 @@ data class Palette(
     val subtext: Rgb,
     val accent: Rgb,
     val light: Boolean,
+    val skin: ThemeSkin = ThemeSkin.STANDARD,
 ) {
+    /** Whether a Windows theme is drawing itself, rather than the interface being drawn in its colours. */
+    val skinned: Boolean get() = skin != ThemeSkin.STANDARD
+
     val faint: Rgb get() = mix(subtext, page.takeIf { it != DEFAULT } ?: if (light) 0xFFFFFF else 0, .45f)
     val line: Rgb get() = mix(subtext, panel.takeIf { it != DEFAULT } ?: if (light) 0xFFFFFF else 0, .62f)
     val selection: Rgb get() = mix(panel.takeIf { it != DEFAULT } ?: if (light) 0xFFFFFF else 0, accent, if (light) .18f else .26f)
@@ -52,6 +60,7 @@ data class Palette(
                 subtext = rgb(colours.subtext),
                 accent = accent,
                 light = colours.light,
+                skin = preferences.themeSkin,
             )
         }
     }

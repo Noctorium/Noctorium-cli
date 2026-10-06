@@ -63,7 +63,11 @@ object NowPlaying {
             val fraction = if (playback.durationMs > 0) playback.positionMs.toFloat() / playback.durationMs else 0f
             val barW = (infoW - 12).coerceAtLeast(6)
             canvas.write(left, infoY + 5, formatTime(playback.positionMs), p.subtext)
-            PlayerBar.seekBar(canvas, p, state.settings.value.preferences.progressBarStyle, left + 6, infoY + 5, barW, fraction.coerceIn(0f, 1f), playback.status == PlaybackStatus.PLAYING, p.page)
+            SeekBars.draw(
+                canvas, p, state.settings.value.preferences.progressBarStyle, left + 6, infoY + 5, barW, fraction.coerceIn(0f, 1f),
+                playback.status == PlaybackStatus.PLAYING, p.page, seed = track.queueKey, durationMs = playback.durationMs,
+                roomAbove = true, roomBelow = true,
+            )
             canvas.write(left + 7 + barW, infoY + 5, formatTime(playback.durationMs), p.subtext)
             if (playback.durationMs > 0) {
                 tui.clickTargets += Tui.ClickTarget(left + 6, infoY + 5, barW, 1) { column ->
