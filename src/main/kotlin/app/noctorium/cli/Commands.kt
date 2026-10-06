@@ -1,11 +1,15 @@
 package app.noctorium.cli
 
-import app.noctorium.bandcamp.BandcampMusicProvider
+import app.noctorium.cli.tui.ListKind
+import app.noctorium.cli.tui.Settings
 import app.noctorium.cli.tui.Tui
 import app.noctorium.cli.tui.formatTime
+import app.noctorium.cli.tui.kind
+import app.noctorium.cli.tui.wrapWords
 import app.noctorium.cli.update.CliUpdates
 import app.noctorium.cli.web.WebPlayer
 import app.noctorium.core.AppState
+import app.noctorium.core.SearchMode
 import app.noctorium.domain.Playlist
 import app.noctorium.domain.ProviderType
 import app.noctorium.domain.SearchResults
@@ -18,14 +22,18 @@ import app.noctorium.settings.AccountConnectionStatus
 import app.noctorium.settings.NoctoriumPreferences
 import app.noctorium.settings.ScrobbleConnectionStatus
 import app.noctorium.settings.SettingsRepository
+import app.noctorium.settings.SpotifyPlayback
 import app.noctorium.update.Version
+import app.noctorium.vk.VkCookies
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import java.nio.file.Files
 import java.nio.file.Path
 
 /**
@@ -36,7 +44,7 @@ import java.nio.file.Path
  */
 object Commands {
     private val usage = """
-        |Noctorium $cliVersion — YouTube Music, SoundCloud and Bandcamp, in a terminal and a browser.
+        |Noctorium $cliVersion — YouTube Music, SoundCloud, Bandcamp, Spotify and VK, in a terminal and a browser.
         |
         |  noctorium                     the player, in this terminal
         |  noctorium play <words|link>   the player, already playing the first match
@@ -52,14 +60,28 @@ object Commands {
         |  noctorium login bandcamp <name>
         |                                your collection at bandcamp.com/<name>, with no password;
         |                                with no name, the one Noctorium on this computer shows
-        |  noctorium logout <youtube|soundcloud|bandcamp|spotify|lastfm|listenbrainz>
+        |  noctorium login spotify       Spotify's own sign-in, in a browser on this computer
+        |      --premium                   Premium: its songs play in your Spotify app
+        |  noctorium login vk            VK, through a signed-in browser's session; says what that means
+        |      --cookies <text|file>       "p=…; remixsid=…", or a cookies.txt holding them
+        |  noctorium logout <youtube|soundcloud|bandcamp|spotify|vk|lastfm|listenbrainz>
+        |  noctorium spotify devices     where your Spotify is open, to play its songs there (Premium)
+        |  noctorium spotify device <name|any>
+        |                                which of them plays Spotify songs
+        |  noctorium spotify play-on <spotify|youtube>
+        |                                Spotify songs in your Spotify app, or matched on YouTube Music
+        |  noctorium settings            how it plays; and to change one:
+        |      speed <0.5–2>               slower or faster, keeping the pitch
+        |      autoplay <on|off>           carry on with songs like the last when the queue runs out
+        |      fade <off|seconds>          how long a sleep timer fades out for
+        |      hybrid <service> <on|off>   whether a search of every service asks this one
         |  noctorium status              accounts, tools and where things are kept
         |  noctorium tools               install or update yt-dlp and mpv
         |  noctorium update              install a newer Noctorium CLI, if there is one
         |      --check                     only say whether there is
         |  noctorium version
         |
-        |In the player, ? lists the keys.
+        |In the player, ? lists the keys, and Settings › Keys changes them.
         |
         |The player and noctorium web look for a newer version once a day and install it by themselves; it
         |takes over when you quit. Settings switches that off, and so does NOCTORIUM_NO_UPDATE=1.
@@ -75,6 +97,8 @@ object Commands {
             "web" -> web(rest)
             "login" -> login(rest)
             "logout" -> logout(rest)
+            "spotify" -> spotify(rest)
+            "settings" -> settings(rest)
             "status" -> status()
             "tools", "doctor" -> tools()
             "update", "upgrade" -> UpdateCommand.run(rest, CliUpdates.forThisCopy(Version.parse(cliVersion)))
@@ -141,6 +165,9 @@ object Commands {
                 }
             } ?: state.ui.value.searchResults
             val out = Out()
+            // Search opens in the mode it was last left in, which core remembers; a narrower one is said.
+            val mode = state.ui.value.searchMode
+            if (mode != SearchMode.HYBRID) println(out.dim("Searched ${mode.displayName} only, as Search was last left; Tab on the player's Search page changes it.\n"))
             if (!results.found()) {
                 println("Nothing found for \"$query\".")
                 return 1
@@ -154,9 +181,12 @@ object Commands {
                     println("      ${out.dim(track.pageUrl)}")
                 }
             }
-            // Bandcamp's albums and artists come as playlists, which is how they open; each is listed as what it is.
-            val (artists, lists) = results.playlists.partition(BandcampMusicProvider::isArtist)
-            val (albums, playlists) = lists.partition { it.provider == ProviderType.BANDCAMP }
+            // Bandcamp's and Spotify's albums and artists come as playlists, which is how they open; each is listed
+            // as what it is.
+            val byKind = results.playlists.groupBy { it.kind }
+            val playlists = byKind[ListKind.PLAYLIST].orEmpty()
+            val albums = byKind[ListKind.ALBUM].orEmpty()
+            val artists = byKind[ListKind.ARTIST].orEmpty()
             var first = results.tracks.isEmpty()
             fun section(title: String, found: List<Playlist>) {
                 if (found.isEmpty()) return
@@ -164,7 +194,9 @@ object Commands {
                 first = false
                 println(out.bold(title))
                 found.forEach { playlist ->
-                    val owner = playlist.ownerName?.takeIf(String::isNotBlank)?.let { "  " + out.dim(it) }.orEmpty()
+                    // Spotify gives an artist "Artist" as its owner, which the heading already says.
+                    val owner = playlist.ownerName?.takeIf { it.isNotBlank() && !(playlist.kind == ListKind.ARTIST && it == "Artist") }
+                        ?.let { "  " + out.dim(it) }.orEmpty()
                     println("  ${out.badge(playlist.provider)}  ${playlist.title}$owner  ${out.dim(playlist.sourceUrl.orEmpty())}")
                 }
             }
@@ -243,11 +275,16 @@ object Commands {
         val words = options.filterNot { it.startsWith("--") }
         val service = words.firstOrNull()?.lowercase() ?: "youtube"
         if (service == "bandcamp" || service == "bc") return bandcamp(words.drop(1).joinToString(" "), fromDesktop = "--from-desktop" in options)
+        if (service == "spotify" || service == "sp") return spotifyLogin(premium = "--premium" in options)
+        if (service == "vk") return vkLogin(options.indexOf("--cookies").takeIf { it >= 0 }?.let { options.getOrNull(it + 1) })
         val youTube = when (service) {
             "youtube", "yt", "youtube-music", "ytm" -> true
             "soundcloud", "sc" -> false
             else -> {
-                System.err.println("Sign in to youtube or soundcloud, or name your Bandcamp collection: noctorium login bandcamp <name>. Spotify and Last.fm are under Settings in the player.")
+                System.err.println(
+                    "Sign in to youtube, soundcloud, spotify or vk, or name your Bandcamp collection: noctorium login bandcamp <name>. " +
+                        "Last.fm and ListenBrainz are under Settings in the player.",
+                )
                 return 2
             }
         }
@@ -336,6 +373,281 @@ object Commands {
     }
 
     /**
+     * `noctorium login spotify`: Spotify's own consent page, in the browser on this computer, and its answer
+     * caught on this computer, at 127.0.0.1 -- so the browser has to be on this one, not on a machine this
+     * terminal is reached from. Any account signs in for the library, likes, search and Home, its songs matched
+     * on YouTube Music; `--premium` asks as well to play them in the account's own Spotify app.
+     */
+    private fun spotifyLogin(premium: Boolean): Int {
+        val parts = parts()
+        val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
+        val out = Out()
+        parts.bridge.notices = { notice ->
+            if (notice is TerminalBridge.Notice.OpenLink) {
+                println(if (notice.opened) "  Spotify's sign-in is open in your browser. If nothing appeared: ${notice.url}" else "  Open this in a browser on this computer: ${notice.url}")
+            }
+        }
+        try {
+            if (premium) state.connectSpotifyPremium() else state.connectSpotify()
+            println(out.dim("  Waiting for Spotify, five minutes at most. The browser has to be on this computer."))
+            // Spotify's answer is the first state that is no longer connecting and says something. Waiting for
+            // connecting to clear is not enough: AppState publishes Spotify's state once as it opens, in the
+            // background, and that can land just after this sign-in has begun.
+            runBlocking { withTimeoutOrNull(6 * 60_000L) { state.settings.first { !it.spotify.connecting && it.spotify.message != null } } }
+            val spotify = state.settings.value.spotify
+            val done = spotify.connected && (!premium || spotify.canPlay)
+            if (done) {
+                val name = state.settings.value.preferences.spotifyAccountName
+                saved { it.spotifyAccountName == name && it.spotifyCanPlay == spotify.canPlay }
+            }
+            spotify.message?.let { println("  ${if (done) out.good("✓") else out.warn("!")} $it") }
+                ?: println(if (done) "  ${out.good("✓")} Spotify is connected." else "  ${out.warn("!")} Spotify did not connect.")
+            return if (done) 0 else 1
+        } finally {
+            state.close()
+        }
+    }
+
+    /**
+     * `noctorium login vk`: VK, through the session of a browser signed in on vk.ru.
+     *
+     * VK has no sign-in for other apps, and a terminal cannot show its page, so the session's two cookies are
+     * given instead -- typed in when asked, or with `--cookies`, as text or a cookies.txt holding them. What
+     * that means is said first, every time, before anything is asked for; core checks the session with VK
+     * before it keeps it, in the credential store and nowhere else.
+     */
+    private fun vkLogin(cookies: String?): Int {
+        val out = Out()
+        println()
+        (Settings.VK_NOTICE + Settings.VK_COOKIES_HOW).forEach { paragraph ->
+            wrapWords(paragraph, 96).forEach { println("  $it") }
+            println()
+        }
+        val text = cookies?.let(::vkCookieText) ?: ask("  Paste them, as p=…; remixsid=…: ")
+        if (text.isNullOrBlank()) {
+            System.err.println("No cookies were given, so nothing changed.")
+            return 2
+        }
+        // Read here first, as core reads them, so a paste that is not the two cookies is said at once.
+        if (VkCookies.parse(text) == null) {
+            System.err.println("Those are not VK's sign-in cookies: both p and remixsid are needed, as p=…; remixsid=…")
+            return 2
+        }
+        val parts = parts()
+        val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
+        try {
+            state.completeVkSignIn(text)
+            // VK's answer, or the cookies' refusal, is a state no longer checking that says something -- not merely
+            // one no longer checking, which AppState's own first look at VK, as it opens, can also be.
+            runBlocking { withTimeoutOrNull(60_000) { state.settings.first { !it.vk.checking && it.vk.message != null } } }
+            val vk = state.settings.value.vk
+            if (vk.connected && !vk.checking) saved { it.vkAccountName == vk.accountName }
+            println("  ${if (vk.connected) out.good("✓") else out.warn("!")} ${vk.message ?: if (vk.connected) "Signed in to VK." else "VK did not answer in time."}")
+            return if (vk.connected) 0 else 1
+        } finally {
+            state.close()
+        }
+    }
+
+    /**
+     * What `--cookies` gave for VK: the cookies as text, or a file holding them -- a cookies.txt exported from a
+     * browser, whose lines become `name=value` for core to read. Those marked #HttpOnly_ are cookies too, and
+     * remixsid is one.
+     */
+    internal fun vkCookieText(given: String): String {
+        val file = runCatching { Path.of(given) }.getOrNull()?.takeIf { runCatching { Files.isRegularFile(it) }.getOrDefault(false) }
+        val text = file?.let { runCatching { Files.readString(it) }.getOrNull() } ?: given
+        val exported = text.lineSequence()
+            .filter { !it.startsWith("#") || it.startsWith("#HttpOnly_") }
+            .map { it.split('\t') }
+            .filter { it.size >= 7 }
+            .map { "${it[5]}=${it[6].trim()}" }
+            .toList()
+        return if (exported.isNotEmpty()) exported.joinToString("; ") else text.trim()
+    }
+
+    /** A line typed at the terminal, not shown as it is typed where the terminal allows that. */
+    private fun ask(prompt: String): String? {
+        System.console()?.let { console -> return console.readPassword(prompt)?.let { String(it) } }
+        print(prompt)
+        return readlnOrNull()
+    }
+
+    /**
+     * `noctorium spotify …`: where Spotify songs play, for an account signed in with Premium. With nothing
+     * after it, how Spotify is set up now.
+     */
+    private fun spotify(options: List<String>): Int {
+        val what = options.firstOrNull()?.lowercase()
+        if (what != null && what !in setOf("devices", "device", "play-on")) {
+            System.err.println("noctorium spotify devices, spotify device <name|any>, or spotify play-on <spotify|youtube>")
+            return 2
+        }
+        val parts = parts()
+        val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
+        val out = Out()
+        try {
+            // The sign-in is read from the credential store in the background as AppState opens, and published
+            // once that is done; nothing here is asked of Spotify before then.
+            runBlocking { withTimeoutOrNull(4_000) { state.settings.first { it.spotify.connected } } }
+            val spotify = state.settings.value.spotify
+            if (!spotify.connected) {
+                println("  ${out.warn("!")} Spotify is not connected: noctorium login spotify --premium")
+                return 1
+            }
+            if (what == null) {
+                println("  Spotify       connected${spotify.accountName.takeIf(String::isNotBlank)?.let { " as $it" }.orEmpty()}${if (spotify.canPlay) ", with Premium" else ""}")
+                println("  Its songs     ${if (spotify.playsOnSpotify) "play in your Spotify app" else "are matched on YouTube Music"}")
+                if (spotify.canPlay) println("  Played on     ${spotify.device.ifBlank { "wherever Spotify is active" }}")
+                return 0
+            }
+            if (what == "play-on") {
+                val onSpotify = when (options.getOrNull(1)?.lowercase()) {
+                    "spotify" -> true
+                    "youtube", "youtube-music", "ytm", "matched" -> false
+                    else -> { System.err.println("Play Spotify songs on spotify or youtube?"); return 2 }
+                }
+                state.setSpotifyPlayback(onSpotify)
+                val now = state.settings.value.spotify
+                if (onSpotify && !now.canPlay) {
+                    println("  ${out.warn("!")} ${now.message ?: "Playing on Spotify needs the Premium sign-in."} noctorium login spotify --premium")
+                    return 1
+                }
+                saved { it.spotifyPlayback == if (onSpotify) SpotifyPlayback.ON_SPOTIFY else SpotifyPlayback.MATCHED }
+                println("  ${out.good("✓")} ${now.message ?: "Done."}")
+                return 0
+            }
+            if (!spotify.canPlay) {
+                println("  ${out.warn("!")} Choosing where Spotify plays needs the Premium sign-in: noctorium login spotify --premium")
+                return 1
+            }
+            val devices = spotifyDevices(state)
+            if (what == "devices") {
+                if (devices.isEmpty()) {
+                    println("  ${out.warn("!")} ${state.settings.value.spotify.message ?: "Spotify is not open anywhere right now."}")
+                    return 1
+                }
+                val chosen = state.settings.value.spotify.device
+                devices.forEach { device ->
+                    val about = listOfNotNull(
+                        device.type.takeIf(String::isNotBlank),
+                        "playing".takeIf { device.isActive },
+                        "takes no commands".takeIf { device.isRestricted },
+                        "chosen".takeIf { device.id == chosen },
+                    ).joinToString(" · ")
+                    println("  ${if (device.isActive) out.good("●") else out.dim("○")} ${device.name.padEnd(28)} ${out.dim(about)}")
+                }
+                if (chosen.isBlank()) println(out.dim("  Spotify songs play wherever Spotify is active."))
+                return 0
+            }
+            // spotify device <name|any>
+            val wanted = options.drop(1).joinToString(" ").trim()
+            if (wanted.isBlank()) { System.err.println("Which device: noctorium spotify device <name|any>"); return 2 }
+            val id = if (wanted.equals("any", ignoreCase = true)) "" else {
+                val exact = devices.filter { it.name.equals(wanted, ignoreCase = true) }
+                val near = exact.ifEmpty { devices.filter { it.name.contains(wanted, ignoreCase = true) } }
+                when (near.size) {
+                    1 -> near.single().id
+                    0 -> { println("  ${out.warn("!")} No device called \"$wanted\". Spotify is open on: ${devices.joinToString { it.name }.ifBlank { "nothing" }}"); return 1 }
+                    else -> { println("  ${out.warn("!")} \"$wanted\" could be ${near.joinToString(" or ") { it.name }}."); return 2 }
+                }
+            }
+            state.chooseSpotifyDevice(id)
+            saved { it.spotifyDevice == id }
+            println("  ${out.good("✓")} ${state.settings.value.spotify.message ?: "Done."}")
+            return 0
+        } finally {
+            state.close()
+        }
+    }
+
+    /** Where the account's Spotify is open, asked of Spotify now; empty, with its reason kept, when nowhere. */
+    private fun spotifyDevices(state: AppState): List<app.noctorium.spotify.SpotifyDevice> {
+        val before = state.settings.value.spotify
+        state.refreshSpotifyDevices()
+        runBlocking { withTimeoutOrNull(10_000) { state.settings.first { it.spotify !== before } } }
+        return state.settings.value.spotify.devices
+    }
+
+    /**
+     * `noctorium settings …`: how Noctorium plays, the same settings the player's Settings page changes. With
+     * nothing after it, what they are; with a name and a value, that one changed.
+     */
+    private fun settings(options: List<String>): Int {
+        val what = options.firstOrNull()?.lowercase()
+        val value = options.getOrNull(1)?.lowercase()
+        val parts = parts()
+        val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
+        val out = Out()
+        try {
+            when (what) {
+                null -> Unit
+                "speed" -> {
+                    val speed = value?.removeSuffix("x")?.removeSuffix("×")?.toFloatOrNull()
+                        ?.takeIf { it in app.noctorium.playback.MIN_SPEED..app.noctorium.playback.MAX_SPEED }
+                        ?: run { System.err.println("A speed from 0.5 to 2, such as 1.25"); return 2 }
+                    state.setPlaybackSpeed(speed)
+                    val kept = state.settings.value.preferences.playbackSpeed
+                    saved { it.playbackSpeed == kept }
+                }
+                "autoplay" -> {
+                    val on = onOrOff(value) ?: run { System.err.println("autoplay on, or autoplay off"); return 2 }
+                    state.setAutoplay(on)
+                    saved { it.autoplay == on }
+                }
+                "fade" -> {
+                    val seconds = if (value == "off" || value == "no") 0 else value?.removeSuffix("s")?.toIntOrNull()
+                    if (seconds == null || seconds < 0) { System.err.println("fade off, or fade with a number of seconds such as 30"); return 2 }
+                    state.setSleepFade(seconds)
+                    val kept = state.settings.value.preferences.sleepFadeSeconds
+                    saved { it.sleepFadeSeconds == kept }
+                }
+                "hybrid" -> {
+                    val service = value?.let(::serviceNamed)
+                    val on = onOrOff(options.getOrNull(2)?.lowercase())
+                    if (service == null || on == null) {
+                        System.err.println("hybrid <youtube-music|youtube-videos|soundcloud|bandcamp|spotify|vk> <on|off>")
+                        return 2
+                    }
+                    state.setHybridSearchService(service, on)
+                    val kept = state.settings.value.preferences.hybridSearch
+                    if ((service in kept) != on) println("  ${out.warn("!")} At least one service has to answer a search.")
+                    saved { it.hybridSearch == kept }
+                }
+                else -> { System.err.println("There is no setting called $what here: speed, autoplay, fade or hybrid."); return 2 }
+            }
+            val preferences = state.settings.value.preferences
+            fun line(name: String, value: String) = println("  ${name.padEnd(20)} $value")
+            line("Speed", Settings.speedName(preferences.playbackSpeed))
+            line("Autoplay", if (preferences.autoplay) "on: the queue carries on with songs like the last" else "off")
+            line("Sleep timer fade", if (preferences.sleepFadeSeconds <= 0) "off" else "${preferences.sleepFadeSeconds} seconds")
+            line(
+                "Hybrid search asks",
+                app.noctorium.settings.DEFAULT_HYBRID_SEARCH.filter { it in preferences.hybridSearch }.joinToString { it.displayName },
+            )
+            return 0
+        } finally {
+            state.close()
+        }
+    }
+
+    private fun onOrOff(value: String?): Boolean? = when (value) {
+        "on", "yes", "true" -> true
+        "off", "no", "false" -> false
+        else -> null
+    }
+
+    private fun serviceNamed(name: String): ProviderType? = when (name) {
+        "youtube-music", "ytm", "youtube", "yt" -> ProviderType.YOUTUBE_MUSIC
+        "youtube-videos", "videos", "yv" -> ProviderType.YOUTUBE_VIDEO
+        "soundcloud", "sc" -> ProviderType.SOUNDCLOUD
+        "bandcamp", "bc" -> ProviderType.BANDCAMP
+        "spotify", "sp" -> ProviderType.SPOTIFY
+        "vk" -> ProviderType.VK
+        else -> null
+    }
+
+    /**
      * Waits, five seconds at most, for what AppState saves in the background to reach the settings file. A
      * command that closes straight after changing a setting would otherwise sometimes stop the save with it.
      */
@@ -378,7 +690,7 @@ object Commands {
     }
 
     private fun logout(options: List<String>): Int {
-        val service = options.firstOrNull()?.lowercase() ?: run { System.err.println("Sign out of which: youtube, soundcloud, bandcamp, spotify, lastfm or listenbrainz?"); return 2 }
+        val service = options.firstOrNull()?.lowercase() ?: run { System.err.println("Sign out of which: youtube, soundcloud, bandcamp, spotify, vk, lastfm or listenbrainz?"); return 2 }
         val parts = parts()
         val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
         try {
@@ -393,6 +705,13 @@ object Commands {
                     return 0
                 }
                 "spotify" -> state.disconnectSpotify()
+                // The session's cookies are forgotten here; nothing changes at VK.
+                "vk" -> {
+                    state.disconnectVk()
+                    saved { it.vkAccountName.isBlank() }
+                    println("Signed out of VK on this computer. Nothing changed at VK itself.")
+                    return 0
+                }
                 "lastfm", "last.fm" -> state.disconnectLastFm()
                 "listenbrainz" -> state.disconnectListenBrainz()
                 else -> { System.err.println("Not a service Noctorium signs in to: $service"); return 2 }
@@ -411,6 +730,11 @@ object Commands {
         val out = Out()
         try {
             Thread.sleep(600)
+            // Spotify's sign-in is read from the credential store as AppState opens, which on Windows goes
+            // through PowerShell and can take longer than the moment above; waited for when one is on record.
+            if (state.settings.value.preferences.spotifyAccountName.isNotBlank()) {
+                runBlocking { withTimeoutOrNull(3_000) { state.settings.first { it.spotify.connected } } }
+            }
             val settings = state.settings.value
             println(out.bold("Noctorium CLI $cliVersion"))
             println()
@@ -423,9 +747,24 @@ object Commands {
             }
             line("YouTube Music", settings.youtubeAccount.status == AccountConnectionStatus.CONNECTED, account(settings.youtubeAccount))
             line("SoundCloud", settings.soundCloudAccount.status == AccountConnectionStatus.CONNECTED, account(settings.soundCloudAccount))
-            line("Spotify", settings.spotify.connected, if (settings.spotify.connected) settings.spotify.accountName else "not connected")
+            val spotify = settings.spotify
+            line(
+                "Spotify",
+                spotify.connected,
+                when {
+                    !spotify.connected -> "not connected — noctorium login spotify"
+                    else -> listOfNotNull(
+                        spotify.accountName.takeIf(String::isNotBlank),
+                        if (spotify.canPlay) "Premium" else null,
+                        if (spotify.playsOnSpotify) "its songs play in your Spotify app" else "its songs are matched on YouTube Music",
+                    ).joinToString(" · ")
+                },
+            )
             val bandcamp = settings.preferences.bandcampUsername
             line("Bandcamp", bandcamp.isNotBlank(), if (bandcamp.isNotBlank()) "bandcamp.com/$bandcamp" else "no collection — noctorium login bandcamp <name>")
+            // The name is kept exactly as long as the session is, so it says without waiting for VK's own check.
+            val vkName = settings.preferences.vkAccountName
+            line("VK Music", vkName.isNotBlank(), vkName.ifBlank { "not signed in — noctorium login vk" })
             line("Last.fm", settings.scrobbling.lastFm.status == ScrobbleConnectionStatus.CONNECTED, settings.scrobbling.lastFm.username ?: "not connected")
             line("ListenBrainz", settings.scrobbling.listenBrainz.status == ScrobbleConnectionStatus.CONNECTED, settings.scrobbling.listenBrainz.username ?: "not connected")
             println()

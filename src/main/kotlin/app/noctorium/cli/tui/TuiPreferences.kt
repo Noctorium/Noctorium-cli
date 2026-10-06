@@ -6,8 +6,8 @@ import kotlinx.serialization.json.Json
 import java.nio.file.Files
 
 /**
- * The two choices that only mean something in a terminal, kept beside the program's settings file rather
- * than in it: that file is the same shape every Noctorium reads, and these have no meaning anywhere else.
+ * The choices that only mean something in a terminal, kept beside the program's settings file rather than
+ * in it: that file is the same shape every Noctorium reads, and these have no meaning anywhere else.
  */
 @Serializable
 class TuiPreferences(
@@ -15,6 +15,11 @@ class TuiPreferences(
     var terminalBackground: Boolean = false,
     /** Draw covers in half blocks. Off for a terminal whose font makes them look like noise. */
     var coverArt: Boolean = true,
+    /**
+     * The keys the listener changed, by action name: only the changes, so the rest keep their defaults and a
+     * key added in a later version arrives with its own. See [KeyMap].
+     */
+    var keys: Map<String, List<String>> = emptyMap(),
 ) {
     fun save() {
         val path = AppDirectories.resolve("terminal.json") ?: return

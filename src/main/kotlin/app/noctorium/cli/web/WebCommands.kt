@@ -209,6 +209,14 @@ class WebCommands(
                 "extend" -> state.extendSleepTimer(command.int("minutes") ?: 10)
                 else -> state.startSleepTimer(command.int("minutes") ?: how?.toIntOrNull() ?: 30)
             }
+            // How it plays: the same settings the terminal player's Settings page changes.
+            "speed" -> state.setPlaybackSpeed(command.float("value") ?: return "No speed")
+            "autoplay" -> state.setAutoplay(command.bool("on") ?: return "On or off?")
+            "sleepFade" -> state.setSleepFade(command.int("seconds") ?: return "No seconds")
+            "hybridSearch" -> state.setHybridSearchService(
+                command.string("provider")?.let { name -> ProviderType.entries.firstOrNull { it.name == name } } ?: return "No such service",
+                command.bool("on") ?: return "On or off?",
+            )
             "connect" -> state.setConnectEnabled(command.bool("on") ?: return "On or off?")
             "renameDevice" -> state.renameThisDevice(command.string("name") ?: return "No name")
             "playOn" -> state.connect.value.devices.firstOrNull { it.id == command.string("id") }?.let(state::playOn) ?: return "That device is gone"
@@ -238,6 +246,7 @@ class WebCommands(
                 "youtube" -> state.disconnectAccount(ProviderType.YOUTUBE_MUSIC)
                 "soundcloud" -> state.disconnectAccount(ProviderType.SOUNDCLOUD)
                 "bandcamp" -> state.setBandcampUsername("")
+                "vk" -> state.disconnectVk()
                 "spotify" -> state.disconnectSpotify()
                 "lastfm" -> state.disconnectLastFm()
                 "listenbrainz" -> state.disconnectListenBrainz()
@@ -259,7 +268,15 @@ class WebCommands(
             "bandcampGenres" -> state.setBandcampGenres(
                 (command.strings("genres") ?: return "No genres").mapNotNull { name -> BandcampGenre.entries.firstOrNull { it.name == name } },
             )
+            // Either sign-in opens Spotify's page in a browser on the computer running Noctorium, whose answer
+            // arrives there; Premium also lets the account's Spotify app play Spotify songs.
             "spotify" -> state.connectSpotify()
+            "spotifyPremium" -> state.connectSpotifyPremium()
+            "spotifyPlayback" -> state.setSpotifyPlayback(command.bool("onSpotify") ?: return "On Spotify or not?")
+            "spotifyDevices" -> state.refreshSpotifyDevices()
+            "spotifyDevice" -> state.chooseSpotifyDevice(command.string("id").orEmpty())
+            // VK's session, pasted from a browser signed in on vk.ru; core checks it with VK before keeping it.
+            "vkSignIn" -> state.completeVkSignIn(command.string("text")?.takeIf(String::isNotBlank) ?: return "No cookies")
             "lastfm" -> state.beginLastFmLogin()
             "lastfmFinish" -> state.finishLastFmLogin()
             "listenbrainz" -> state.connectListenBrainz(command.string("token") ?: return "No token")

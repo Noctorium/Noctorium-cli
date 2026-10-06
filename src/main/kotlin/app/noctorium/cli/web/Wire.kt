@@ -3,6 +3,7 @@ package app.noctorium.cli.web
 import app.noctorium.bandcamp.BandcampGenre
 import app.noctorium.cli.DesktopSignIn
 import app.noctorium.cli.cliVersion
+import app.noctorium.cli.tui.Settings
 import app.noctorium.core.AppState
 import app.noctorium.domain.Album
 import app.noctorium.domain.Artist
@@ -12,6 +13,7 @@ import app.noctorium.domain.Track
 import app.noctorium.domain.editableOnService
 import app.noctorium.playback.SleepTimerState
 import app.noctorium.playlists.LocalPlaylist
+import app.noctorium.settings.DEFAULT_HYBRID_SEARCH
 import app.noctorium.settings.ThemePreset
 import app.noctorium.settings.resolvedAccent
 import app.noctorium.settings.themeColours
@@ -105,6 +107,8 @@ data class WPlayback(
     val boost: Boolean,
     val output: String,
     val sleep: WSleep,
+    /** A Spotify song the account's own Spotify app is playing: the sound is there, not here or in a tab. */
+    val onSpotify: Boolean = false,
     val at: Long = System.currentTimeMillis(),
 )
 
@@ -150,7 +154,15 @@ data class WLibrary(
 data class WChannel(val pageId: String, val name: String, val authUser: Int, val photoUrl: String? = null, val handle: String? = null, val selected: Boolean)
 
 @Serializable
-data class WLikes(val keys: List<String>, val busy: List<String>, val soundCloudReady: Boolean, val youTubeReady: Boolean, val channels: List<WChannel>)
+data class WLikes(
+    val keys: List<String>,
+    val busy: List<String>,
+    val soundCloudReady: Boolean,
+    val youTubeReady: Boolean,
+    val channels: List<WChannel>,
+    val spotifyReady: Boolean = false,
+    val vkReady: Boolean = false,
+)
 
 @Serializable
 data class WLine(val text: String, val startMs: Long? = null)
@@ -201,6 +213,39 @@ data class WBandcamp(
 )
 
 @Serializable
+data class WSpotifyDevice(val id: String, val name: String, val type: String, val active: Boolean, val restricted: Boolean, val volume: Int? = null)
+
+/**
+ * Spotify's two sign-ins and what the Premium one allows: whether its songs play in the account's own Spotify
+ * app, and on which of the places that app is open.
+ */
+@Serializable
+data class WSpotify(
+    val connected: Boolean,
+    val connecting: Boolean,
+    val account: String,
+    val message: String? = null,
+    /** The Premium sign-in: Spotify songs can be played on Spotify itself. */
+    val canPlay: Boolean,
+    val playsOnSpotify: Boolean,
+    /** Where the account's Spotify is open, as last asked; empty until asked. */
+    val devices: List<WSpotifyDevice>,
+    /** The device chosen, by Spotify's id; blank for whichever Spotify has active. */
+    val device: String,
+)
+
+/** VK, signed in with a browser's session, and what to read before signing in. */
+@Serializable
+data class WVk(
+    val connected: Boolean,
+    val account: String,
+    val checking: Boolean,
+    val message: String? = null,
+    /** What signing in to VK means, and where the two cookies are: the terminal player says the same. */
+    val notice: List<String>,
+)
+
+@Serializable
 data class WTheme(
     val name: String,
     val title: String,
@@ -236,7 +281,18 @@ data class WSettings(
     val spotifyConnected: Boolean,
     val spotifyConnecting: Boolean,
     val spotifyAccount: String,
+    val spotify: WSpotify,
     val bandcamp: WBandcamp,
+    val vk: WVk,
+    /** How fast it plays, 1 being as recorded, from 0.5 to 2. */
+    val playbackSpeed: Float,
+    /** The queue running out carries on with songs like the last. */
+    val autoplay: Boolean,
+    /** The services a Hybrid search asks, by name, and every one it could. */
+    val hybridSearch: List<String>,
+    val hybridServices: List<String>,
+    /** Seconds a sleep timer fades out over; zero for none. */
+    val sleepFade: Int,
     val lastfm: WService,
     val listenbrainz: WService,
     val scrobbles: Int,
@@ -296,10 +352,11 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
             null -> WSleep()
             else -> WSleep()
         }
+        val onSpotify = p.track?.provider == ProviderType.SPOTIFY && state.settings.value.spotify.playsOnSpotify
         return wireJson.encodeToJsonElement(
             WPlayback(
                 p.status.name.lowercase(), p.track?.wire(), p.errorMessage, p.volume, p.positionMs, p.durationMs,
-                p.isMuted, p.volumeBoostEnabled, engine.output.value.name.lowercase(), sleep,
+                p.isMuted, p.volumeBoostEnabled, engine.output.value.name.lowercase(), sleep, onSpotify,
             ),
         )
     }
@@ -353,6 +410,7 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
             WLikes(
                 l.likedKeys.toList(), l.busyKeys.toList(), l.soundCloudReady, l.youTubeReady,
                 l.youTubeChannels.map { WChannel(it.pageId, it.name, it.authUser, it.photoUrl, it.handle, it.selected) },
+                l.spotifyReady, l.vkReady,
             ),
         )
     }
@@ -403,6 +461,28 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
                 spotifyConnected = s.spotify.connected,
                 spotifyConnecting = s.spotify.connecting,
                 spotifyAccount = s.spotify.accountName,
+                spotify = WSpotify(
+                    connected = s.spotify.connected,
+                    connecting = s.spotify.connecting,
+                    account = s.spotify.accountName,
+                    message = s.spotify.message,
+                    canPlay = s.spotify.canPlay,
+                    playsOnSpotify = s.spotify.playsOnSpotify,
+                    devices = s.spotify.devices.map { WSpotifyDevice(it.id, it.name, it.type, it.isActive, it.isRestricted, it.volumePercent) },
+                    device = s.spotify.device,
+                ),
+                vk = WVk(
+                    connected = s.vk.connected,
+                    account = s.vk.accountName,
+                    checking = s.vk.checking,
+                    message = s.vk.message,
+                    notice = Settings.VK_NOTICE + Settings.VK_COOKIES_HOW,
+                ),
+                playbackSpeed = p.playbackSpeed,
+                autoplay = p.autoplay,
+                hybridSearch = DEFAULT_HYBRID_SEARCH.filter { it in p.hybridSearch }.map { it.name },
+                hybridServices = DEFAULT_HYBRID_SEARCH.map { it.name },
+                sleepFade = p.sleepFadeSeconds,
                 bandcamp = WBandcamp(
                     username = p.bandcampUsername,
                     fanName = s.bandcamp.fanName,

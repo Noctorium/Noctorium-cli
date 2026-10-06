@@ -17,6 +17,7 @@ import app.noctorium.settings.NoctoriumPreferences
 import app.noctorium.settings.SettingsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import java.nio.file.Files
 
 /**
  * The terminal's AppState with a stand-in for Bandcamp as its only service, and a fan's name already in a
@@ -76,19 +77,27 @@ object BandcampStandIn {
     }
 
     /**
-     * Built as [cliAppState] builds the real one, but with the stand-in for its services and settings of its
-     * own -- written afresh each time, so one test's change is not the next one's starting point.
+     * Built as [cliAppState] builds the real one, but with stand-ins for its services and a settings file of its
+     * own, made afresh from [preferences] for each one. Its own, not shared: AppState saves in the background,
+     * and a save the last test started can still be under way when the next one begins.
+     * [more] are stand-ins for other services beside Bandcamp's; see [SpotifyStandIn] and [VkStandIn].
      */
-    fun state(parts: CliParts, engine: PlaybackEngine = Silent()): AppState {
-        val file = AppDirectories.resolve("bandcamp-test", "settings.json") ?: error("No folder for the test's settings")
-        val settings = SettingsRepository(file).also { it.save(NoctoriumPreferences(bandcampUsername = FAN)) }
+    fun state(
+        parts: CliParts,
+        engine: PlaybackEngine = Silent(),
+        more: List<MusicProvider> = emptyList(),
+        preferences: NoctoriumPreferences = NoctoriumPreferences(bandcampUsername = FAN),
+    ): AppState {
+        val folder = AppDirectories.resolve("stand-in-settings") ?: error("No folder for the test's settings")
+        Files.createDirectories(folder)
+        val settings = SettingsRepository(Files.createTempDirectory(folder, "state").resolve("settings.json")).also { it.save(preferences) }
         return AppState(
             ytDlp = parts.backend,
             credentials = parts.credentials,
             system = parts.bridge,
             downloads = parts.downloads,
             playbackEngine = engine,
-            injectedProviders = listOf(Provider()),
+            injectedProviders = listOf<MusicProvider>(Provider()) + more,
             settingsRepository = settings,
             checkForUpdatesAtLaunch = false,
         )

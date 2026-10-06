@@ -4,7 +4,7 @@
 
 # Noctorium CLI
 
-**YouTube Music, SoundCloud and Bandcamp, in a terminal — and in every browser in the house.**
+**YouTube Music, SoundCloud, Bandcamp, Spotify and VK, in a terminal — and in every browser in the house.**
 
 </div>
 
@@ -22,8 +22,11 @@ noctorium web                   the web player, for any browser on your network
 
 ## What it does
 
-- **Every service in one place.** Home, search and your library from YouTube Music, SoundCloud and
-  Bandcamp, your Spotify playlists played from YouTube Music or SoundCloud, one queue for all of it.
+- **Every service in one place.** Home, search and your library from YouTube Music, SoundCloud, Bandcamp,
+  Spotify and VK, one queue for all of it. Spotify's songs play matched on YouTube Music, or with Premium
+  in your own Spotify app, wherever it is open.
+- **Made yours.** The speed, from half to double; carrying on with similar songs when the queue runs out;
+  which services a search of all of them asks; a sleep timer that fades out; and every key.
 - **Your real accounts.** Likes go to the service; playlists are made, renamed, reordered, made public or
   private and deleted there.
 - **Synced lyrics** from eight sources, lit up line by line as they are sung, with the source switched
@@ -91,7 +94,24 @@ with the name from your `bandcamp.com/<name>` address, puts your collection and 
 `noctorium logout bandcamp` takes them out again. Its songs are streamed for listening; to keep one, buy it
 on its Bandcamp page (`o` opens it).
 
+Spotify signs in on its own page, in a browser on this computer, which is where Spotify sends its answer:
+`noctorium login spotify` for any account — the library, likes, search and two rows of Home, its songs
+played matched on YouTube Music — or `noctorium login spotify --premium`, which also lets your Spotify app
+play them. Then `noctorium spotify devices` lists where Spotify is open, `noctorium spotify device <name|any>`
+picks one, and `noctorium spotify play-on <spotify|youtube>` switches between the two.
+
+VK offers no music to other apps, so `noctorium login vk` uses your vk.ru session the way VK's own web
+player does: the `p` cookie from login.vk.ru and `remixsid` from vk.ru, copied from a browser signed in to
+VK, typed in when it asks or given with `--cookies "p=…; remixsid=…"`. That is against VK's terms, and VK
+may ask you to confirm it is you, or freeze an account it thinks is automated; it says so before it asks.
+Many songs do not play outside Russia, and VK's songs cannot be downloaded.
+
+`noctorium settings` shows how it plays, and changes it: `noctorium settings speed 1.25`, `autoplay off`,
+`fade 30`, `hybrid vk off`.
+
 ## The keys
+
+As they come; Settings › Keys changes any of them, and `?` always lists them as they are.
 
 | | |
 | --- | --- |
@@ -101,6 +121,7 @@ on its Bandcamp page (`o` opens it).
 | `Space` `n` `p` | Play or pause, next, previous |
 | `←` `→` | Back or on five seconds (thirty with Shift) |
 | `+` `-` `m` | Volume, mute |
+| `<` `>` | Slower, faster |
 | `s` `r` | Shuffle, repeat |
 | `a` `A` `P` | Add to the queue, play next, add to a playlist |
 | `l` `d` | Like on the real account, download to keep |
@@ -108,6 +129,9 @@ on its Bandcamp page (`o` opens it).
 | `w` | Start the web player |
 | `z` | Sleep timer |
 | `?` | All of them |
+
+The arrows, Enter, Escape and Tab stay as they are. A key can only be given where it would not take one
+of its jobs from something else, and Delete on a changed key in Settings › Keys puts it back.
 
 ## The web player
 
@@ -126,9 +150,9 @@ streams to the addresses of the big hosting companies, and serves yours. The pag
 In the desktop's data folder, under `cli/` — `%LOCALAPPDATA%\Noctorium\cli` on Windows,
 `~/Library/Application Support/Noctorium/cli` on a Mac, `~/.local/share/noctorium/cli` on Linux — with its
 own settings, so the two never write over each other. mpv and yt-dlp the desktop already downloaded are used
-rather than fetched again. Secrets (Spotify, Last.fm) go to DPAPI on Windows, the Keychain on a Mac and the
-desktop keyring through `secret-tool` on Linux; on a machine with no keyring they are kept for the session
-only, never written to a file.
+rather than fetched again. Secrets (Spotify, Last.fm, VK's session) go to DPAPI on Windows, the Keychain on a
+Mac and the desktop keyring through `secret-tool` on Linux; on a machine with no keyring they are kept for the
+session only, never written to a file.
 
 ## Building
 
@@ -147,4 +171,4 @@ cd Noctorium-cli
 ---
 
 <sub>Free software under the GPL-3.0. Noctorium is an independent client and not affiliated with Google,
-YouTube, SoundCloud, Bandcamp, Spotify, Last.fm, ListenBrainz or Discord.</sub>
+YouTube, SoundCloud, Bandcamp, Spotify, VK, Last.fm, ListenBrainz or Discord.</sub>

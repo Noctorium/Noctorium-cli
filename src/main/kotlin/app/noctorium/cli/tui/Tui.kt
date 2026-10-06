@@ -65,6 +65,23 @@ class Tui(
     internal var palette = Palette.from(state.settings.value.preferences, null, false)
     internal val preferences = TuiPreferences.load()
 
+    /** The keys in force: the defaults, with the listener's changes over them. See [KeyMap]. */
+    internal var keys: KeyMap = KeyMap.loaded(preferences.keys)
+        private set
+
+    /** Whether the Settings page shows the keys instead of the settings. */
+    internal var keysOpen = false
+
+    /** Makes [map] the keys, here and in the terminal's own preferences file. */
+    internal fun useKeys(map: KeyMap) {
+        keys = map
+        preferences.keys = map.saved()
+        preferences.save()
+    }
+
+    /** What to press for [action], as a hint names it. */
+    internal fun key(action: KeyAction): String = keys.name(action)
+
     /** The search box: what is typed, and whether the keys go to it. */
     internal var searchText = ""
     internal var searchFocused = false
@@ -259,6 +276,7 @@ class Tui(
             add("SC" to (settings.soundCloudAccount.status == app.noctorium.settings.AccountConnectionStatus.CONNECTED))
             if (settings.spotify.connected) add("SP" to true)
             if (settings.preferences.bandcampUsername.isNotBlank()) add("BC" to true)
+            if (settings.vk.connected) add("VK" to true)
         }
         var right = w - 1
         web?.address?.let {
@@ -307,7 +325,7 @@ class Tui(
                 row++
             }
         }
-        canvas.write(x + 2, y + h - 1, "? keys   v$cliVersion", p.faint, bg, max = w - 3)
+        canvas.write(x + 2, y + h - 1, "${key(KeyAction.HELP)} keys   v$cliVersion", p.faint, bg, max = w - 3)
     }
 
     private fun drawToasts(canvas: Canvas, w: Int, bottom: Int) {
@@ -336,6 +354,7 @@ class Tui(
 
     internal fun go(target: Page) {
         page = target
+        keysOpen = false
         searchFocused = target == Page.SEARCH && searchText.isBlank()
         when (target) {
             Page.LIBRARY -> state.refreshLibrary()
@@ -372,38 +391,65 @@ class Tui(
                 Keys.F1 -> overlays.addLast(Overlay.Help)
                 else -> Unit
             }
-            is Input.Text -> when (input.char) {
-                " " -> state.togglePlayback()
-                "n" -> state.next()
-                "p" -> state.previous()
-                "+", "=" -> state.setVolume((playback.volume + .05f).coerceAtMost(1f))
-                "-", "_" -> state.setVolume((playback.volume - .05f).coerceAtLeast(0f))
-                "m" -> state.toggleMute()
-                "s" -> { state.toggleShuffle(); toast(if (!state.queue.state.value.shuffleEnabled) "Shuffle off" else "Shuffle on") }
-                "r" -> {
-                    state.cycleRepeat()
-                    toast(
-                        when (state.queue.state.value.repeatMode) {
-                            RepeatMode.OFF -> "Repeat off"
-                            RepeatMode.ALL -> "Repeating the queue"
-                            RepeatMode.ONE -> "Repeating this track"
-                        },
-                    )
+            is Input.Text -> {
+                if (input.char == "^l") { screen.invalidate(); return }
+                when (val action = keys.action(input.char, KeyScope.EVERYWHERE)) {
+                    KeyAction.PLAY_PAUSE -> state.togglePlayback()
+                    KeyAction.NEXT -> state.next()
+                    KeyAction.PREVIOUS -> state.previous()
+                    KeyAction.VOLUME_UP -> state.setVolume((playback.volume + .05f).coerceAtMost(1f))
+                    KeyAction.VOLUME_DOWN -> state.setVolume((playback.volume - .05f).coerceAtLeast(0f))
+                    KeyAction.MUTE -> state.toggleMute()
+                    KeyAction.SHUFFLE -> { state.toggleShuffle(); toast(if (!state.queue.state.value.shuffleEnabled) "Shuffle off" else "Shuffle on") }
+                    KeyAction.REPEAT -> {
+                        state.cycleRepeat()
+                        toast(
+                            when (state.queue.state.value.repeatMode) {
+                                RepeatMode.OFF -> "Repeat off"
+                                RepeatMode.ALL -> "Repeating the queue"
+                                RepeatMode.ONE -> "Repeating this track"
+                            },
+                        )
+                    }
+                    KeyAction.SLOWER -> changeSpeed(-1)
+                    KeyAction.FASTER -> changeSpeed(1)
+                    KeyAction.LIKE_PLAYING -> playback.track?.let(::like)
+                    KeyAction.SEARCH -> { go(Page.SEARCH); searchFocused = true }
+                    KeyAction.HELP -> overlays.addLast(Overlay.Help)
+                    KeyAction.QUIT -> running = false
+                    KeyAction.SLEEP_TIMER -> overlays.addLast(Overlays.sleepTimer(this))
+                    KeyAction.THEME_NEXT -> cycleTheme(1)
+                    KeyAction.THEME_PREVIOUS -> cycleTheme(-1)
+                    KeyAction.WEB_PLAYER -> toggleWeb()
+                    else -> pageKeys[action]?.let(::go)
                 }
-                "L" -> playback.track?.let(::like)
-                "/" -> { go(Page.SEARCH); searchFocused = true }
-                "?" -> overlays.addLast(Overlay.Help)
-                "q" -> running = false
-                "z" -> overlays.addLast(Overlays.sleepTimer(this))
-                "t" -> cycleTheme(1)
-                "T" -> cycleTheme(-1)
-                "w" -> toggleWeb()
-                "1", "2", "3", "4", "5", "6", "7", "8" -> go(Page.entries[input.char.toInt() - 1])
-                "^l" -> screen.invalidate()
-                else -> Unit
             }
             else -> Unit
         }
+    }
+
+    /** The pages the number keys go to, by the actions those keys are. */
+    private val pageKeys = mapOf(
+        KeyAction.PAGE_HOME to Page.HOME,
+        KeyAction.PAGE_SEARCH to Page.SEARCH,
+        KeyAction.PAGE_LIBRARY to Page.LIBRARY,
+        KeyAction.PAGE_QUEUE to Page.QUEUE,
+        KeyAction.PAGE_NOW_PLAYING to Page.NOW_PLAYING,
+        KeyAction.PAGE_DOWNLOADS to Page.DOWNLOADS,
+        KeyAction.PAGE_DEVICES to Page.DEVICES,
+        KeyAction.PAGE_SETTINGS to Page.SETTINGS,
+    )
+
+    /**
+     * One step slower or faster through the speeds people choose -- half, three quarters, as recorded, and up
+     * by quarters to double -- from wherever it is now, which another device may have left between two.
+     */
+    internal fun changeSpeed(direction: Int, say: Boolean = true) {
+        val now = state.settings.value.preferences.playbackSpeed
+        val next = if (direction > 0) Settings.SPEEDS.firstOrNull { it > now + .01f } ?: Settings.SPEEDS.last()
+        else Settings.SPEEDS.lastOrNull { it < now - .01f } ?: Settings.SPEEDS.first()
+        state.setPlaybackSpeed(next)
+        if (say) toast("Speed: ${Settings.speedName(next)}")
     }
 
     /** Settings' "Check for updates": the same as the daily check, asked for, so it always answers. */

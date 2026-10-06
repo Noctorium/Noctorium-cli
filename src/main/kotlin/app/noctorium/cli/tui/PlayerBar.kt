@@ -46,7 +46,7 @@ object PlayerBar {
         // The track, or what is happening instead of one.
         if (track == null) {
             canvas.write(left, inner, "Nothing playing", p.subtext, bg, BOLD, max = infoWidth)
-            if (rows >= 2) canvas.write(left, inner + 1, "Find something with / and press Enter", p.faint, bg, max = infoWidth)
+            if (rows >= 2) canvas.write(left, inner + 1, "Find something with ${tui.key(KeyAction.SEARCH)} and press Enter", p.faint, bg, max = infoWidth)
         } else {
             canvas.write(left, inner, track.title, p.text, bg, BOLD, max = infoWidth)
             val second = when (playback.status) {
@@ -61,7 +61,10 @@ object PlayerBar {
                 val liked = state.likes.value.isLiked(track)
                 val note = buildString {
                     append(track.provider.badge())
+                    // Spotify's own app is playing it, wherever that is: the sound is not coming from here.
+                    if (NowPlaying.playsOnSpotify(tui, track)) append("  on Spotify")
                     if (liked) append("  ♥")
+                    preferences.playbackSpeed.takeIf { it != 1f }?.let { append("  ${Settings.speedName(it)}") }
                     tui.state.sleepTimerRemainingMs.value?.let { append("  ☾ ${formatTime(it)}") }
                     if (state.sleepTimer.value is app.noctorium.playback.SleepTimerState.EndOfTrack) append("  ☾ end of track")
                 }

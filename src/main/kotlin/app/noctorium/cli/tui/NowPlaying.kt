@@ -1,5 +1,7 @@
 package app.noctorium.cli.tui
 
+import app.noctorium.domain.ProviderType
+import app.noctorium.domain.Track
 import app.noctorium.domain.pageUrl
 import app.noctorium.playback.PlaybackStatus
 
@@ -25,7 +27,7 @@ object NowPlaying {
         val track = playback.track
         if (track == null) {
             canvas.writeCentred(x, w, y + h / 2 - 1, "Nothing is playing", p.subtext, null, BOLD)
-            canvas.writeCentred(x, w, y + h / 2 + 1, "Press / to find something, then Enter", p.faint)
+            canvas.writeCentred(x, w, y + h / 2 + 1, "Press ${tui.key(KeyAction.SEARCH)} to find something, then Enter", p.faint)
             return
         }
         if (track.queueKey != lastTrack) {
@@ -73,12 +75,20 @@ object NowPlaying {
         if (actionsY < y + h) {
             val liked = state.likes.value.isLiked(track)
             // Only where a like can go to the account: not under a Bandcamp song, say.
-            if (liked || track.provider.keepsLikes) canvas.write(left, actionsY, if (liked) "♥ liked" else "♡ l to like", if (liked) p.accent else p.faint)
-            canvas.write(left + 14, actionsY, track.provider.displayName, p.badgeColour(track.provider), null, BOLD, max = infoW - 14)
+            if (liked || track.provider.keepsLikes) {
+                canvas.write(left, actionsY, if (liked) "♥ liked" else "♡ ${tui.key(KeyAction.LIKE)} to like", if (liked) p.accent else p.faint)
+            }
+            // A Spotify song the account's own Spotify app is playing says so: the sound is not coming from here.
+            val where = if (playsOnSpotify(tui, track)) "on Spotify" else track.provider.displayName
+            canvas.write(left + 14, actionsY, where, p.badgeColour(track.provider), null, BOLD, max = infoW - 14)
         }
         val follow = state.artistFollow.value
         if (follow != null && actionsY + 1 < y + h) {
-            canvas.write(left, actionsY + 1, if (follow.following == true) "✓ following ${follow.name}" else "f to follow ${follow.name}", p.faint, max = infoW)
+            canvas.write(
+                left, actionsY + 1,
+                if (follow.following == true) "✓ following ${follow.name}" else "${tui.key(KeyAction.FOLLOW_ARTIST)} to follow ${follow.name}",
+                p.faint, max = infoW,
+            )
         }
 
         // The lyrics: beside the cover on a wide screen, under everything on a narrow one.
@@ -113,7 +123,7 @@ object NowPlaying {
         if (result == null || result.lines.isEmpty()) {
             val message = when {
                 lyrics.loading -> "Looking in ${lyrics.outcomes.size.takeIf { it > 0 } ?: "eight"} places…"
-                result?.sourceUrl != null -> "${result.provider.displayName} only links to its lyrics: o opens them."
+                result?.sourceUrl != null -> "${result.provider.displayName} only links to its lyrics: ${tui.key(KeyAction.OPEN_PAGE)} opens them."
                 outcome != null -> outcome.detail ?: "${outcome.provider.displayName} has nothing for this track."
                 else -> lyrics.errorMessage ?: "No lyrics for this one."
             }
@@ -170,27 +180,33 @@ object NowPlaying {
         }
         if (input !is Input.Text) return false
         val lyrics = state.lyrics.value
-        when (input.char) {
-            "[", "]" -> {
+        // This page's own keys first, then the chosen track's -- here, the one playing -- as on every list.
+        val action = tui.keys.action(input.char, KeyScope.NOW_PLAYING) ?: tui.keys.action(input.char, KeyScope.TRACK)
+        when (action) {
+            KeyAction.LYRICS_PREVIOUS, KeyAction.LYRICS_NEXT -> {
                 val choices = lyrics.outcomes.map { it.provider }
                 if (choices.isEmpty()) return true
                 val at = choices.indexOf(lyrics.selectedProvider).coerceAtLeast(0)
-                val step = if (input.char == "]") 1 else choices.size - 1
+                val step = if (action == KeyAction.LYRICS_NEXT) 1 else choices.size - 1
                 val next = choices[(at + step) % choices.size]
                 state.selectLyricsProvider(next)
                 manualOffset = null
             }
-            "l" -> tui.like(track)
-            "f" -> state.toggleFollowArtist()
-            "a" -> Unit
-            "o" -> lyrics.outcomes.firstOrNull { it.provider == lyrics.selectedProvider }?.result?.sourceUrl?.let(state::openExternalUrl)
+            KeyAction.LIKE -> tui.like(track)
+            KeyAction.FOLLOW_ARTIST -> state.toggleFollowArtist()
+            KeyAction.ADD_TO_QUEUE -> Unit
+            KeyAction.OPEN_PAGE -> lyrics.outcomes.firstOrNull { it.provider == lyrics.selectedProvider }?.result?.sourceUrl?.let(state::openExternalUrl)
                 ?: state.openExternalUrl(track.pageUrl)
-            "c" -> state.copyTrackLink(track)
-            "d" -> if (!state.canKeep(track)) Tracks.notKept(tui) else { state.downloadTrack(track); tui.toast("Downloading ${track.title}…") }
-            "P" -> tui.overlays.addLast(Tracks.addToPlaylist(tui, track))
-            "R" -> { state.loadLyrics(track, forceRefresh = true); tui.toast("Asking every source again…") }
+            KeyAction.COPY_LINK -> state.copyTrackLink(track)
+            KeyAction.DOWNLOAD -> if (!state.canKeep(track)) Tracks.notKept(tui, track) else { state.downloadTrack(track); tui.toast("Downloading ${track.title}…") }
+            KeyAction.ADD_TO_PLAYLIST -> tui.overlays.addLast(Tracks.addToPlaylist(tui, track))
+            KeyAction.LYRICS_AGAIN -> { state.loadLyrics(track, forceRefresh = true); tui.toast("Asking every source again…") }
             else -> return false
         }
         return true
     }
+
+    /** Whether [track] is a Spotify song that the account's own Spotify app is playing, rather than this computer. */
+    fun playsOnSpotify(tui: Tui, track: Track): Boolean =
+        track.provider == ProviderType.SPOTIFY && tui.state.settings.value.spotify.playsOnSpotify
 }

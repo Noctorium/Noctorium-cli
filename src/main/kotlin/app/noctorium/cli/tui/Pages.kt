@@ -1,6 +1,5 @@
 package app.noctorium.cli.tui
 
-import app.noctorium.bandcamp.BandcampMusicProvider
 import app.noctorium.core.SearchMode
 import app.noctorium.domain.PlaybackOrigin
 import app.noctorium.domain.Playlist
@@ -44,6 +43,7 @@ object Pages {
 
     private fun heading(tui: Tui): String = when (tui.page) {
         Page.LIBRARY -> openPlaylistTitle(tui) ?: "Your library"
+        Page.SETTINGS -> if (tui.keysOpen) "Keys" else tui.page.title
         else -> tui.page.title
     }
 
@@ -55,6 +55,7 @@ object Pages {
 
     private fun subtitle(tui: Tui): String? {
         val state = tui.state
+        val k = tui::key
         return when (tui.page) {
             Page.HOME -> if (state.ui.value.homeLoading) "Loading…" else "From every service"
             Page.SEARCH -> if (state.ui.value.searchLoading) "Searching…" else state.ui.value.searchMode.displayName
@@ -63,31 +64,39 @@ object Pages {
                 val local = library.openLocalPlaylist
                 val open = library.openPlaylist
                 when {
-                    tui.libraryOpen && local != null -> "On this computer · ${local.tracks.size} tracks · Enter play · R rename · D delete · Esc back"
+                    tui.libraryOpen && local != null ->
+                        "On this computer · ${local.tracks.size} tracks · Enter play · ${k(KeyAction.RENAME_PLAYLIST)} rename · ${k(KeyAction.DELETE_PLAYLIST)} delete · Esc back"
                     tui.libraryOpen && open != null -> listOfNotNull(
-                        if (BandcampMusicProvider.isArtist(open)) "Artist on Bandcamp" else open.provider.displayName,
+                        when (open.kind) {
+                            ListKind.ARTIST -> "Artist on ${open.provider.displayName}"
+                            else -> open.provider.displayName
+                        },
                         (open.trackCount ?: open.tracks.size).let { "$it tracks" },
                         when (open.isPublic) { true -> "public"; false -> "private"; null -> null },
                         if (library.openPlaylistLoading) "loading…" else null,
-                        if (open.editableOnService()) "R rename · V public/private · D delete" else null,
+                        if (open.editableOnService()) {
+                            "${k(KeyAction.RENAME_PLAYLIST)} rename · ${k(KeyAction.PLAYLIST_VISIBILITY)} public/private · ${k(KeyAction.DELETE_PLAYLIST)} delete"
+                        } else null,
                         "Esc back",
                     ).joinToString(" · ")
                     library.loading -> "Loading…"
-                    else -> "${library.playlists.size + library.localPlaylists.size} playlists · N new"
+                    else -> "${library.playlists.size + library.localPlaylists.size} playlists · ${k(KeyAction.NEW_PLAYLIST)} new"
                 }
             }
             Page.QUEUE -> state.queue.state.value.let { q ->
-                if (q.tracks.isEmpty()) null else "${q.tracks.size} tracks · x remove · J K move · C clear"
+                if (q.tracks.isEmpty()) null
+                else "${q.tracks.size} tracks · ${k(KeyAction.REMOVE)} remove · ${k(KeyAction.MOVE_DOWN)} ${k(KeyAction.MOVE_UP)} move · ${k(KeyAction.CLEAR_QUEUE)} clear"
             }
-            Page.DOWNLOADS -> "${state.downloadState.value.entries.size} kept · Enter play · x delete"
+            Page.DOWNLOADS -> "${state.downloadState.value.entries.size} kept · Enter play · ${k(KeyAction.REMOVE)} delete"
             Page.DEVICES -> "Noctorium Connect and the web player"
-            Page.SETTINGS -> "← → or Enter to change"
+            Page.SETTINGS -> if (tui.keysOpen) "Enter changes one · Delete puts it back · Esc back to Settings" else "← → or Enter to change"
             Page.NOW_PLAYING -> null
         }
     }
 
     private fun key(tui: Tui): String = when {
         tui.page == Page.LIBRARY && tui.libraryOpen -> "library:" + (tui.state.library.value.openLocalPlaylist?.id ?: tui.state.library.value.openPlaylist?.playlistKey)
+        tui.page == Page.SETTINGS && tui.keysOpen -> "SETTINGS:keys"
         else -> tui.page.name
     }
 
@@ -98,7 +107,7 @@ object Pages {
         Page.QUEUE -> queueRows(tui)
         Page.DOWNLOADS -> downloadRows(tui)
         Page.DEVICES -> Settings.deviceRows(tui)
-        Page.SETTINGS -> Settings.rows(tui)
+        Page.SETTINGS -> if (tui.keysOpen) Settings.keyRows(tui) else Settings.rows(tui)
         Page.NOW_PLAYING -> emptyList()
     }
 
@@ -122,8 +131,8 @@ object Pages {
             add(Row.Gap)
         }
         if (ui.homeSections.isEmpty()) {
-            if (ui.homeLoading) add(Row.Note("Gathering your home from YouTube Music, SoundCloud and Bandcamp…"))
-            else add(Row.Note("Nothing here yet. Sign in under Settings (8), or search with /.", Row.Tone.QUIET))
+            if (ui.homeLoading) add(Row.Note("Gathering your home from every service…"))
+            else add(Row.Note("Nothing here yet. Sign in under Settings (${tui.key(KeyAction.PAGE_SETTINGS)}), or search with ${tui.key(KeyAction.SEARCH)}.", Row.Tone.QUIET))
         }
         ui.errorMessage?.let { add(Row.Note(it, Row.Tone.WARN)) }
     }
@@ -136,15 +145,18 @@ object Pages {
             return@buildList
         }
         /*
-         * Bandcamp answers with its albums and its artists as playlists, which is what lets Enter open either
-         * like any other list, so they are listed under what they are rather than as playlists. The same
-         * albums and artists come a second time as bare names, in `albums` and `artists`, and are left out
-         * there: a name can only be searched for again, and the playlist above it already opens it.
+         * Bandcamp and Spotify answer with their albums and artists as playlists, which is what lets Enter
+         * open either like any other list, so they are listed under what they are rather than as playlists.
+         * The same albums and artists come a second time as bare names, in `albums` and `artists`, and are
+         * left out there: a name can only be searched for again, and the playlist above it already opens it.
          */
-        val (bandcampArtists, lists) = results.playlists.partition(BandcampMusicProvider::isArtist)
-        val (bandcampAlbums, playlists) = lists.partition { it.provider == ProviderType.BANDCAMP }
-        val albums = results.albums.filter { it.provider != ProviderType.BANDCAMP }
-        val artists = results.artists.filter { it.provider != ProviderType.BANDCAMP }
+        val opened = setOf(ProviderType.BANDCAMP, ProviderType.SPOTIFY)
+        val byKind = results.playlists.groupBy { it.kind }
+        val playlists = byKind[ListKind.PLAYLIST].orEmpty()
+        val openableAlbums = byKind[ListKind.ALBUM].orEmpty()
+        val openableArtists = byKind[ListKind.ARTIST].orEmpty()
+        val albums = results.albums.filter { it.provider !in opened }
+        val artists = results.artists.filter { it.provider !in opened }
         if (results.tracks.isNotEmpty()) {
             add(Row.Header("Tracks", "${results.tracks.size}"))
             results.tracks.forEach { add(Row.Song(it, results.tracks, PlaybackOrigin.SEARCH)) }
@@ -155,9 +167,9 @@ object Pages {
             playlists.forEach { add(Row.PlaylistItem(it)) }
             add(Row.Gap)
         }
-        if (bandcampAlbums.isNotEmpty() || albums.isNotEmpty()) {
+        if (openableAlbums.isNotEmpty() || albums.isNotEmpty()) {
             add(Row.Header("Albums"))
-            bandcampAlbums.forEach { add(Row.PlaylistItem(it)) }
+            openableAlbums.forEach { add(Row.PlaylistItem(it)) }
             albums.forEach { album ->
                 add(
                     Row.Action(
@@ -169,9 +181,9 @@ object Pages {
             }
             add(Row.Gap)
         }
-        if (bandcampArtists.isNotEmpty() || artists.isNotEmpty()) {
+        if (openableArtists.isNotEmpty() || artists.isNotEmpty()) {
             add(Row.Header("Artists"))
-            bandcampArtists.forEach { add(Row.PlaylistItem(it)) }
+            openableArtists.forEach { add(Row.PlaylistItem(it)) }
             artists.forEach { artist ->
                 add(Row.Action(artist.name, hint = artist.provider.displayName, run = { search(tui, artist.name) }))
             }
@@ -191,7 +203,7 @@ object Pages {
         val local = library.openLocalPlaylist
         val open = library.openPlaylist
         if (tui.libraryOpen && local != null) {
-            if (local.tracks.isEmpty()) add(Row.Note("Nothing in it yet: P on any track adds it here."))
+            if (local.tracks.isEmpty()) add(Row.Note("Nothing in it yet: ${tui.key(KeyAction.ADD_TO_PLAYLIST)} on any track adds it here."))
             local.tracks.forEachIndexed { i, track ->
                 add(Row.Song(track, local.tracks, PlaybackOrigin.PLAYLIST, number = i + 1, inLocalPlaylist = local, playlistIndex = i))
             }
@@ -212,8 +224,12 @@ object Pages {
         }
         library.errorMessage?.let { add(Row.Note(it, Row.Tone.BAD)) }
         val byService = library.playlists.groupBy { it.provider }
-        // Bandcamp's are a fan's collection, a playlist for each release, and their wishlist.
-        listOf(ProviderType.YOUTUBE_MUSIC, ProviderType.YOUTUBE_VIDEO, ProviderType.SOUNDCLOUD, ProviderType.SPOTIFY, ProviderType.BANDCAMP).forEach { provider ->
+        // Bandcamp's are a fan's collection, a playlist for each release, and their wishlist; VK's, My music
+        // and then the account's playlists.
+        listOf(
+            ProviderType.YOUTUBE_MUSIC, ProviderType.YOUTUBE_VIDEO, ProviderType.SOUNDCLOUD, ProviderType.SPOTIFY,
+            ProviderType.BANDCAMP, ProviderType.VK,
+        ).forEach { provider ->
             val lists = byService[provider].orEmpty()
             if (lists.isEmpty()) return@forEach
             add(Row.Header(provider.displayName, "${lists.size}"))
@@ -234,7 +250,7 @@ object Pages {
     private fun queueRows(tui: Tui): List<Row> = buildList {
         val queue = tui.state.queue.state.value
         if (queue.tracks.isEmpty()) {
-            add(Row.Note("The queue is empty. Play something, or press a on a track to add it."))
+            add(Row.Note("The queue is empty. Play something, or press ${tui.key(KeyAction.ADD_TO_QUEUE)} on a track to add it."))
             return@buildList
         }
         val current = queue.currentIndex
@@ -281,7 +297,7 @@ object Pages {
             add(Row.Header("Kept to play offline", "${tracks.size}"))
             tracks.forEach { add(Row.Song(it, tracks, PlaybackOrigin.LIBRARY)) }
         } else if (downloads.active.isEmpty()) {
-            add(Row.Note("Nothing kept yet. Press d on a track to keep it for when there is no connection."))
+            add(Row.Note("Nothing kept yet. Press ${tui.key(KeyAction.DOWNLOAD)} on a track to keep it for when there is no connection."))
         }
     }
 
@@ -392,8 +408,13 @@ object Pages {
                         tui.state.closeLocalPlaylist()
                         return true
                     }
+                    if (tui.page == Page.SETTINGS && tui.keysOpen) {
+                        tui.keysOpen = false
+                        return true
+                    }
                     return input.key == Keys.BACKSPACE
                 }
+                Keys.DELETE -> if (row is Row.Action && row.remove != null) { row.remove.invoke(); return true }
                 Keys.LEFT, Keys.RIGHT -> {
                     if (row is Row.Action && row.step != null) {
                         row.step.invoke(if (input.key == Keys.RIGHT) 1 else -1)
@@ -406,18 +427,24 @@ object Pages {
             }
         }
         if (input is Input.Text) {
+            val keys = tui.keys
             if (row is Row.Song && Tracks.handle(tui, row, input.char)) return true
-            if (row is Row.PlaylistItem && input.char == "P") return true
+            // The playlist key on a playlist does nothing, rather than reaching whatever is bound everywhere.
+            if (row is Row.PlaylistItem && keys.matches(input.char, KeyAction.ADD_TO_PLAYLIST)) return true
             if (tui.page == Page.LIBRARY && Tracks.playlistKeys(tui, input.char)) return true
-            if (tui.page == Page.QUEUE && input.char == "C") {
+            if (tui.page == Page.QUEUE && keys.matches(input.char, KeyAction.CLEAR_QUEUE)) {
                 tui.overlays.addLast(Overlay.Confirm("Clear the queue?", "Playback stops too.") { tui.state.clearQueue() })
                 return true
             }
-            if (tui.page == Page.DOWNLOADS && input.char == "X") {
+            if (tui.page == Page.DOWNLOADS && keys.matches(input.char, KeyAction.DELETE_ALL_DOWNLOADS)) {
                 tui.overlays.addLast(Overlay.Confirm("Delete every kept track?", "They can be downloaded again any time.") { tui.state.deleteAllDownloads() })
                 return true
             }
-            if (tui.page == Page.HOME && input.char == "R") { tui.state.refreshHome(); tui.toast("Refreshing your home…"); return true }
+            if (tui.page == Page.HOME && keys.matches(input.char, KeyAction.REFRESH_HOME)) {
+                tui.state.refreshHome()
+                tui.toast("Refreshing your home…")
+                return true
+            }
         }
         return false
     }
@@ -476,34 +503,40 @@ object Tracks {
     fun handle(tui: Tui, row: Row.Song, key: String): Boolean {
         val state = tui.state
         val track = row.track
-        when (key) {
-            "a" -> { state.addToQueue(track); tui.toast("Added to the queue: ${track.title}") }
-            "A" -> { state.playNext(track); tui.toast("Playing next: ${track.title}") }
-            "l" -> tui.like(track)
-            "d" -> if (!state.canKeep(track)) notKept(tui) else { state.downloadTrack(track); tui.toast("Downloading ${track.title}…") }
-            "e" -> when {
-                !state.canKeep(track) -> notKept(tui)
+        when (tui.keys.action(key, KeyScope.TRACK)) {
+            KeyAction.ADD_TO_QUEUE -> { state.addToQueue(track); tui.toast("Added to the queue: ${track.title}") }
+            KeyAction.PLAY_NEXT -> { state.playNext(track); tui.toast("Playing next: ${track.title}") }
+            KeyAction.LIKE -> tui.like(track)
+            KeyAction.DOWNLOAD -> if (!state.canKeep(track)) notKept(tui, track) else { state.downloadTrack(track); tui.toast("Downloading ${track.title}…") }
+            KeyAction.SAVE_MP3 -> when {
+                !state.canKeep(track) -> notKept(tui, track)
                 state.canSaveAsMp3() -> { state.exportTrack(track); tui.toast("Saving ${track.title} as an MP3…") }
                 else -> tui.toast("Saving as MP3 needs mpv", Row.Tone.WARN)
             }
-            "c" -> state.copyTrackLink(track)
-            "o" -> state.openExternalUrl(track.pageUrl)
-            "i" -> { val pinned = state.isPinned(track); state.togglePin(track); tui.toast(if (pinned) "Unpinned from Home" else "Pinned to Home") }
-            "P" -> tui.overlays.addLast(addToPlaylist(tui, track))
-            "x" -> remove(tui, row)
-            "J" -> move(tui, row, 1)
-            "K" -> move(tui, row, -1)
+            KeyAction.COPY_LINK -> state.copyTrackLink(track)
+            KeyAction.OPEN_PAGE -> state.openExternalUrl(track.pageUrl)
+            KeyAction.PIN -> { val pinned = state.isPinned(track); state.togglePin(track); tui.toast(if (pinned) "Unpinned from Home" else "Pinned to Home") }
+            KeyAction.ADD_TO_PLAYLIST -> tui.overlays.addLast(addToPlaylist(tui, track))
+            KeyAction.REMOVE -> remove(tui, row)
+            KeyAction.MOVE_DOWN -> move(tui, row, 1)
+            KeyAction.MOVE_UP -> move(tui, row, -1)
             else -> return false
         }
         return true
     }
 
     /**
-     * What d and e say on a track that may not be kept: Bandcamp's, which are streamed to be heard on the way
-     * to being bought (see AppState.canKeep). Said here rather than left to core, which would refuse as well,
-     * so that "Downloading…" is never shown for a download that is not going to happen.
+     * What the download and save keys say on a track that may not be kept (see AppState.canKeep): Bandcamp's,
+     * streamed to be heard on the way to being bought, and VK's, which VK licenses for playing and not for
+     * keeping. Said here rather than left to core, which would refuse as well, so that "Downloading…" is never
+     * shown for a download that is not going to happen.
      */
-    fun notKept(tui: Tui) = tui.toast("Bandcamp's songs are for listening here; to keep one, buy it on its page (o opens it)", Row.Tone.WARN, 6)
+    fun notKept(tui: Tui, track: Track) = tui.toast(
+        if (track.provider == ProviderType.VK) "VK's songs play here but cannot be downloaded (${tui.key(KeyAction.OPEN_PAGE)} opens it on VK)"
+        else "Bandcamp's songs are for listening here; to keep one, buy it on its page (${tui.key(KeyAction.OPEN_PAGE)} opens it)",
+        Row.Tone.WARN,
+        6,
+    )
 
     private fun remove(tui: Tui, row: Row.Song) {
         val state = tui.state
@@ -632,15 +665,15 @@ object Tracks {
         val selected = rows.getOrNull(tui.list(if (tui.libraryOpen) currentKey(tui) else "LIBRARY").selected)
         val local = if (tui.libraryOpen) library.openLocalPlaylist else (selected as? Row.LocalItem)?.playlist
         val service: Playlist? = if (tui.libraryOpen) library.openPlaylist?.takeIf { library.openLocalPlaylist == null } else (selected as? Row.PlaylistItem)?.playlist
-        when (key) {
-            "N" -> { newPlaylist(tui, null); return true }
-            "S" -> {
+        when (tui.keys.action(key, KeyScope.LIBRARY)) {
+            KeyAction.NEW_PLAYLIST -> { newPlaylist(tui, null); return true }
+            KeyAction.SHUFFLE_PLAYLIST -> {
                 val playlist = service ?: return false
                 if (!state.queue.state.value.shuffleEnabled) state.toggleShuffle()
                 state.playPlaylist(playlist)
                 return true
             }
-            "R" -> {
+            KeyAction.RENAME_PLAYLIST -> {
                 if (local != null) {
                     tui.overlays.addLast(Overlay.Prompt("Rename", "A new name for this playlist.", local.title) { if (it.isNotBlank()) state.renamePlaylist(local.id, it) })
                     return true
@@ -657,7 +690,7 @@ object Tracks {
                 )
                 return true
             }
-            "V" -> {
+            KeyAction.PLAYLIST_VISIBILITY -> {
                 val playlist = service?.takeIf { it.editableOnService() } ?: return false
                 val makePublic = playlist.isPublic != true
                 when (playlist.provider) {
@@ -667,7 +700,7 @@ object Tracks {
                 tui.toast(if (makePublic) "Making it public…" else "Making it private…")
                 return true
             }
-            "D" -> {
+            KeyAction.DELETE_PLAYLIST -> {
                 if (local != null) {
                     tui.overlays.addLast(Overlay.Confirm("Delete \"${local.title}\"?", "It is only on this computer.") {
                         state.deletePlaylist(local.id)
@@ -688,6 +721,7 @@ object Tracks {
                 )
                 return true
             }
+            else -> Unit
         }
         return false
     }

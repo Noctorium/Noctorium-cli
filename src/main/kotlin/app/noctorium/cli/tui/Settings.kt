@@ -15,11 +15,14 @@ import app.noctorium.settings.EqualizerPreset
 import app.noctorium.settings.AccountConnectionStatus
 import app.noctorium.settings.ProgressBarStyle
 import app.noctorium.settings.ScrobbleConnectionStatus
+import app.noctorium.settings.DEFAULT_HYBRID_SEARCH
 import app.noctorium.settings.ThemePreset
 import app.noctorium.settings.TimeDisplay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.file.Path
 
 /**
@@ -69,22 +72,59 @@ object Settings {
                 run = { tui.overlays.addLast(soundCloudMenu(tui)) },
             ),
         )
+        // Spotify has two sign-ins, one asking more than the other: any account, for the library, likes, search
+        // and two rows of Home, its songs played matched on YouTube Music; and Premium, which also lets the
+        // account's own Spotify app play them, wherever it is open. Either opens the browser on this computer.
         val spotify = settings.spotify
         add(
             Row.Action(
-                "Spotify library",
+                "Spotify",
                 value = when {
-                    spotify.connected -> "Connected" + (spotify.accountName.takeIf { it.isNotBlank() }?.let { " as $it" } ?: "")
                     spotify.connecting -> "Waiting for the browser…"
-                    else -> "Not connected"
+                    spotify.connected -> "Connected" + (spotify.accountName.takeIf { it.isNotBlank() }?.let { " as $it" } ?: "") +
+                        if (spotify.canPlay) " · Premium" else ""
+                    else -> "Not connected: Enter signs in, any account"
                 },
                 tone = if (spotify.connected) Row.Tone.GOOD else Row.Tone.QUIET,
                 run = {
-                    if (spotify.connected) tui.overlays.addLast(Overlay.Confirm("Disconnect Spotify?", "Your Spotify playlists leave the library.") { state.disconnectSpotify() })
-                    else state.connectSpotify()
+                    if (spotify.connected) {
+                        tui.overlays.addLast(Overlay.Confirm("Disconnect Spotify?", "Your Spotify playlists leave the library, and its likes their hearts.") { state.disconnectSpotify() })
+                    } else if (!spotify.connecting) {
+                        state.connectSpotify()
+                    }
                 },
             ),
         )
+        add(
+            Row.Action(
+                "Spotify Premium",
+                value = when {
+                    spotify.canPlay -> "Signed in: Spotify songs can play in your Spotify app"
+                    spotify.connecting -> "Waiting for the browser…"
+                    else -> "Enter signs in with Premium, to play in your Spotify app"
+                },
+                tone = if (spotify.canPlay) Row.Tone.GOOD else Row.Tone.QUIET,
+                run = { if (!spotify.connecting) state.connectSpotifyPremium() },
+            ),
+        )
+        if (spotify.canPlay) {
+            add(
+                Row.Action(
+                    "Spotify songs play",
+                    value = if (spotify.playsOnSpotify) "On Spotify" else "Matched on YouTube Music",
+                    step = { state.setSpotifyPlayback(!spotify.playsOnSpotify) },
+                ),
+            )
+            add(
+                Row.Action(
+                    "Spotify plays on",
+                    value = spotify.devices.firstOrNull { it.id == spotify.device }?.name
+                        ?: if (spotify.device.isBlank()) "Wherever Spotify is active" else "The device chosen before",
+                    run = { spotifyDevices(tui) },
+                ),
+            )
+        }
+        spotify.message?.let { add(Row.Note(it)) }
         // Bandcamp is a name rather than a sign-in: it shows a fan's collection and wishlist to anybody. The name
         // is what is kept; the fan's own name for themselves is known once Bandcamp has confirmed it, here.
         val bandcamp = settings.bandcamp
@@ -110,6 +150,25 @@ object Settings {
                 run = { tui.overlays.addLast(bandcampGenres(tui)) },
             ),
         )
+        // VK: a browser's vk.ru session, pasted, since there is no browser here to sign in with.
+        val vk = settings.vk
+        add(
+            Row.Action(
+                "VK Music",
+                value = when {
+                    vk.checking -> "Checking with VK…"
+                    vk.connected -> "Signed in as ${vk.accountName}"
+                    else -> "Not signed in: Enter says how"
+                },
+                tone = when {
+                    vk.checking -> Row.Tone.QUIET
+                    vk.connected -> Row.Tone.GOOD
+                    else -> Row.Tone.QUIET
+                },
+                run = { if (!vk.checking) tui.overlays.addLast(vkMenu(tui)) },
+            ),
+        )
+        vk.message?.let { add(Row.Note(it)) }
         val scrobbling = settings.scrobbling
         add(
             Row.Action(
@@ -189,9 +248,50 @@ object Settings {
                 tui.preferences.save()
             }),
         )
+        val changedKeys = tui.keys.changes.size
+        add(
+            Row.Action(
+                "Keys",
+                value = if (changedKeys == 0) "As they came" else "$changedKeys changed",
+                hint = "Every key the player answers to",
+                run = {
+                    tui.keysOpen = true
+                    tui.list("SETTINGS:keys").selected = 0
+                },
+            ),
+        )
         add(Row.Gap)
 
         add(Row.Header("Playing"))
+        add(
+            Row.Action(
+                "Speed",
+                value = speedName(preferences.playbackSpeed) + if (preferences.playbackSpeed == 1f) " (as recorded)" else "",
+                step = { by -> tui.changeSpeed(by, say = false) },
+            ),
+        )
+        add(
+            Row.Action(
+                "When the queue runs out",
+                value = if (preferences.autoplay) "Carry on with songs like the last" else "Stop",
+                step = { state.setAutoplay(!preferences.autoplay) },
+            ),
+        )
+        add(
+            Row.Action(
+                "Sleep timer fades out",
+                value = if (preferences.sleepFadeSeconds <= 0) "No: it stops at once" else "Over ${preferences.sleepFadeSeconds} seconds",
+                step = { by -> state.setSleepFade(cycle(FADES, preferences.sleepFadeSeconds, by)) },
+            ),
+        )
+        val asked = HYBRID_SERVICES.filter { it in preferences.hybridSearch }
+        add(
+            Row.Action(
+                "Hybrid search asks",
+                value = if (asked.size == HYBRID_SERVICES.size) "Every service" else asked.joinToString { it.displayName },
+                run = { tui.overlays.addLast(hybridSearch(tui)) },
+            ),
+        )
         add(Row.Action("Skip what is not the music in YouTube videos", value = onOff(preferences.skipNonMusic), step = { state.setSkipNonMusic(!preferences.skipNonMusic) }))
         add(Row.Action("Volume boost", value = onOff(state.playback.value.volumeBoostEnabled), step = { state.toggleVolumeBoost() }))
         // The equaliser's presets, with Off first; a curve of the listener's own, set on the desktop or the
@@ -300,7 +400,7 @@ object Settings {
                 run = { tui.toggleWeb() },
             ),
         )
-        add(Row.Note("Starts a page this computer serves, for a phone, a tablet or another computer on your network. w does the same anywhere."))
+        add(Row.Note("Starts a page this computer serves, for a phone, a tablet or another computer on your network. ${tui.key(KeyAction.WEB_PLAYER)} does the same anywhere."))
         add(Row.Gap)
 
         add(Row.Header("Noctorium Connect"))
@@ -442,6 +542,156 @@ object Settings {
      * colour depends on this.
      */
     private const val BANDCAMP_REMOVED = "Bandcamp collection removed."
+
+    /**
+     * Where the account's Spotify is open, asked of Spotify afresh, to choose which one plays Spotify songs.
+     *
+     * Spotify answers in a moment, and the list is shown once it has -- or after a few seconds, with whatever
+     * is known, when the answer changed nothing that could be seen.
+     */
+    private fun spotifyDevices(tui: Tui) {
+        val state = tui.state
+        val before = state.settings.value.spotify
+        state.refreshSpotifyDevices()
+        tui.toast("Asking Spotify where it is open…")
+        io.launch {
+            withTimeoutOrNull(3_000) { state.settings.first { it.spotify !== before } }
+            val spotify = state.settings.value.spotify
+            if (spotify.devices.isEmpty()) {
+                tui.toast(spotify.message ?: "Spotify is not open anywhere right now.", Row.Tone.WARN, 8)
+            } else {
+                val options = buildList<Pair<String, () -> Unit>> {
+                    add(("Wherever Spotify is active" + if (spotify.device.isBlank()) "  ✓" else "") to { state.chooseSpotifyDevice("") })
+                    spotify.devices.forEach { device ->
+                        val about = listOfNotNull(
+                            device.type.takeIf(String::isNotBlank),
+                            "playing".takeIf { device.isActive },
+                            "takes no commands".takeIf { device.isRestricted },
+                        ).joinToString(" · ")
+                        val label = device.name + (if (about.isNotBlank()) "  $about" else "") + if (device.id == spotify.device) "  ✓" else ""
+                        add(label to { state.chooseSpotifyDevice(device.id) })
+                    }
+                }
+                tui.overlays.addLast(Overlay.Picker("Play Spotify songs on", options, "Spotify's app has to be open there."))
+            }
+            tui.invalidate()
+        }
+    }
+
+    /**
+     * VK, signed in or not. Signing in is pasting a browser's session, after saying plainly what that means:
+     * a terminal cannot show VK's sign-in page, and VK gives no other way in.
+     */
+    private fun vkMenu(tui: Tui): Overlay {
+        val state = tui.state
+        if (!state.settings.value.vk.connected) return vkNotice(tui)
+        return Overlay.Picker(
+            "VK Music",
+            listOf(
+                "Sign in again, with another browser's cookies…" to { tui.overlays.addLast(vkNotice(tui)) },
+                "Sign out" to {
+                    tui.overlays.addLast(Overlay.Confirm("Sign out of VK here?", "The session is forgotten on this computer; nothing changes at VK.") { state.disconnectVk() })
+                },
+            ),
+        )
+    }
+
+    private fun vkNotice(tui: Tui): Overlay = Overlay.Notice("Signing in to VK", VK_NOTICE + VK_COOKIES_HOW) {
+        tui.overlays.addLast(
+            Overlay.Prompt("VK cookies", "p and remixsid, pasted as they are: p=…; remixsid=…", secret = true) { text ->
+                if (text.isNotBlank()) tui.state.completeVkSignIn(text)
+            },
+        )
+    }
+
+    /** Which services a Hybrid search asks, ticked in a list of all of them and kept once it is put away. */
+    private fun hybridSearch(tui: Tui): Overlay {
+        val state = tui.state
+        val asked = state.settings.value.preferences.hybridSearch
+        return Overlay.Checklist(
+            "Hybrid search asks",
+            HYBRID_SERVICES.map { it.displayName },
+            HYBRID_SERVICES.indices.filter { HYBRID_SERVICES[it] in asked },
+            "Spotify only while its songs play on Spotify; VK once signed in",
+        ) { chosen ->
+            val wanted = chosen.map { HYBRID_SERVICES[it] }.toSet()
+            // Added before any is taken out, so the list is never empty on the way: core keeps one at least.
+            (wanted - asked).forEach { state.setHybridSearchService(it, true) }
+            (asked - wanted).forEach { state.setHybridSearchService(it, false) }
+        }
+    }
+
+    /**
+     * The keys, a row for each thing a key does, grouped by where it works. Enter asks for a new key, Delete puts
+     * the one chosen back as it came, and the first row puts them all back.
+     */
+    fun keyRows(tui: Tui): List<Row> = buildList {
+        val keys = tui.keys
+        add(
+            Row.Action(
+                "Put every key back as it came",
+                value = if (keys.changes.isEmpty()) "Nothing is changed" else "${keys.changes.size} changed",
+                tone = if (keys.changes.isEmpty()) Row.Tone.QUIET else Row.Tone.ACCENT,
+                run = {
+                    if (keys.changes.isNotEmpty()) {
+                        tui.overlays.addLast(Overlay.Confirm("Put every key back as it came?", "Each changed key goes back to its default.") { tui.useKeys(KeyMap.DEFAULT) })
+                    }
+                },
+            ),
+        )
+        add(Row.Note("The arrows, Enter, Escape, Tab and the keys inside a list or a question stay as they are."))
+        KeyScope.entries.forEach { scope ->
+            add(Row.Gap)
+            add(Row.Header(scope.title))
+            KeyAction.entries.filter { it.scope == scope }.forEach { action ->
+                val changed = action in keys.changes
+                val putBack = {
+                    val back = tui.keys.reset(action)
+                    if (back != null) {
+                        tui.useKeys(back)
+                        tui.toast("${action.label}: ${back.names(action)} again")
+                    } else {
+                        tui.toast("Its old key has another job now; change that one first", Row.Tone.WARN)
+                    }
+                }
+                add(
+                    Row.Action(
+                        action.label,
+                        value = keys.names(action) + if (changed) "   (was ${action.defaults.joinToString(" ") { KeyMap.describe(it) }})" else "",
+                        tone = if (changed) Row.Tone.ACCENT else Row.Tone.NORMAL,
+                        run = { tui.overlays.addLast(Overlay.KeyCapture(action)) },
+                        remove = putBack.takeIf { changed },
+                    ),
+                )
+            }
+        }
+    }
+
+    /** The speeds the keys and the setting step through, from half to double. */
+    val SPEEDS = listOf(.5f, .75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
+
+    /** A speed as people say it: 1×, 1.25×, 0.75×. */
+    fun speedName(speed: Float): String =
+        "%.2f".format(java.util.Locale.ROOT, speed).trimEnd('0').trimEnd('.') + "×"
+
+    /** How long a sleep timer can fade out over, in seconds; none first. */
+    private val FADES = listOf(0, 15, 30, 60)
+
+    /** Every service a Hybrid search can ask, in the order Settings shows them. */
+    private val HYBRID_SERVICES = DEFAULT_HYBRID_SEARCH.toList()
+
+    /** What signing in to VK means, before anybody does it. Shown here, by `noctorium login vk`, and on the web. */
+    val VK_NOTICE = listOf(
+        "VK offers no music to other apps, so Noctorium uses your vk.ru session the way VK's own web player does.",
+        "That is against VK's terms. VK may ask you to confirm it is you, or freeze an account it thinks is automated.",
+        "Many songs do not play outside Russia, and VK's songs cannot be downloaded.",
+    )
+
+    /** Where the two cookies are. */
+    val VK_COOKIES_HOW = listOf(
+        "In a browser signed in to vk.ru, open the developer tools' cookies: copy p from login.vk.ru, and remixsid " +
+            "from vk.ru. They stay on this computer, in its credential store.",
+    )
 
     /** "Catppuccin Mocha", "Noctorium Night", and "Nord" rather than "Nord Nord". */
     fun themeName(theme: ThemePreset): String = when {

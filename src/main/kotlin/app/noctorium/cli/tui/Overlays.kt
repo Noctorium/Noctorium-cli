@@ -30,40 +30,54 @@ sealed interface Overlay {
     }
 
     data object Help : Overlay {
-        private val keys = listOf(
-            "Moving about" to listOf(
-                "1 – 8, Tab" to "The pages, by number or in turn",
-                "↑ ↓  PgUp PgDn" to "Choose; the mouse wheel and clicks work too",
-                "Enter" to "Play it from here, or open it",
-                "Esc  Backspace" to "Back",
-                "/" to "Search every service at once, or paste a link",
-            ),
-            "Playing" to listOf(
-                "Space" to "Play or pause",
-                "n  p" to "Next, previous",
-                "← →" to "Back or on five seconds; with Shift, thirty",
-                "+ -  m" to "Volume, mute",
-                "s  r" to "Shuffle, repeat",
-                "z" to "Sleep timer",
-            ),
-            "The selected track" to listOf(
-                "a  A" to "Add to the queue, or play it next",
-                "l" to "Like or unlike, on the real account (L: the one playing)",
-                "P" to "Add to a playlist",
-                "d  e" to "Download to keep, or save as an MP3 in your music folder",
-                "c  o" to "Copy its link, open it in the browser",
-                "x  J K" to "Remove from the queue or playlist, move it down or up",
-            ),
-            "Noctorium" to listOf(
-                "t  T" to "Next or previous theme",
-                "w" to "Start the web player, for any browser in the house",
-                "?" to "These keys",
-                "q  Ctrl+C" to "Quit",
-            ),
-        )
+        /** The keys as they are now, changed or not, in the places a person looks for them. */
+        private fun keys(tui: Tui): List<Pair<String, List<Pair<String, String>>>> {
+            val k = tui.keys
+            fun of(vararg actions: KeyAction) = actions.joinToString("  ") { k.names(it) }
+            val pages = listOf(
+                KeyAction.PAGE_HOME, KeyAction.PAGE_SEARCH, KeyAction.PAGE_LIBRARY, KeyAction.PAGE_QUEUE,
+                KeyAction.PAGE_NOW_PLAYING, KeyAction.PAGE_DOWNLOADS, KeyAction.PAGE_DEVICES, KeyAction.PAGE_SETTINGS,
+            )
+            val numbered = pages.map { k.keys(it) } == (1..8).map { listOf("$it") }
+            return listOf(
+                "Moving about" to listOf(
+                    (if (numbered) "1 – 8, Tab" else pages.joinToString(" ") { k.name(it) } + ", Tab") to "The pages, by number or in turn",
+                    "↑ ↓  PgUp PgDn" to "Choose; the mouse wheel and clicks work too",
+                    "Enter" to "Play it from here, or open it",
+                    "Esc  Backspace" to "Back",
+                    of(KeyAction.SEARCH) to "Search every service at once, or paste a link",
+                ),
+                "Playing" to listOf(
+                    of(KeyAction.PLAY_PAUSE) to "Play or pause",
+                    of(KeyAction.NEXT, KeyAction.PREVIOUS) to "Next, previous",
+                    "← →" to "Back or on five seconds; with Shift, thirty",
+                    "${k.name(KeyAction.VOLUME_UP)} ${k.name(KeyAction.VOLUME_DOWN)}  ${k.name(KeyAction.MUTE)}" to "Volume, mute",
+                    of(KeyAction.SHUFFLE, KeyAction.REPEAT) to "Shuffle, repeat",
+                    of(KeyAction.SLOWER, KeyAction.FASTER) to "Slower or faster, from half to double speed",
+                    of(KeyAction.SLEEP_TIMER) to "Sleep timer",
+                ),
+                "The selected track" to listOf(
+                    of(KeyAction.ADD_TO_QUEUE, KeyAction.PLAY_NEXT) to "Add to the queue, or play it next",
+                    of(KeyAction.LIKE) to "Like or unlike, on the real account (${k.name(KeyAction.LIKE_PLAYING)}: the one playing)",
+                    of(KeyAction.ADD_TO_PLAYLIST) to "Add to a playlist",
+                    of(KeyAction.DOWNLOAD, KeyAction.SAVE_MP3) to "Download to keep, or save as an MP3 in your music folder",
+                    of(KeyAction.COPY_LINK, KeyAction.OPEN_PAGE) to "Copy its link, open it in the browser",
+                    of(KeyAction.PIN) to "Pin it to Home, or unpin it",
+                    "${k.name(KeyAction.REMOVE)}  ${k.name(KeyAction.MOVE_DOWN)} ${k.name(KeyAction.MOVE_UP)}" to
+                        "Remove from the queue or playlist, move it down or up",
+                ),
+                "Noctorium" to listOf(
+                    of(KeyAction.THEME_NEXT, KeyAction.THEME_PREVIOUS) to "Next or previous theme",
+                    of(KeyAction.WEB_PLAYER) to "Start the web player, for any browser in the house",
+                    of(KeyAction.HELP) to "These keys; Settings › Keys changes them",
+                    "${k.name(KeyAction.QUIT)}  Ctrl+C" to "Quit",
+                ),
+            )
+        }
 
         override fun draw(tui: Tui, canvas: Canvas, w: Int, h: Int) {
             val p = tui.palette
+            val keys = keys(tui)
             val lines = keys.sumOf { it.second.size + 2 }
             panel(tui, canvas, w, h, 92, lines + 3, "Keys") { x, y, pw, _ ->
                 var row = y
@@ -246,6 +260,71 @@ sealed interface Overlay {
         }
     }
 
+    /**
+     * Waits for the key to give [action]: any one printable key that nothing it would meet already has.
+     *
+     * A key that clashes is refused here, with what has it, rather than taken and left to quietly stop one of
+     * the two from working. Escape leaves things as they were, and so cannot itself be given to anything.
+     */
+    class KeyCapture(val action: KeyAction) : Overlay {
+        private var problem: String? = null
+
+        override fun draw(tui: Tui, canvas: Canvas, w: Int, h: Int) {
+            val p = tui.palette
+            panel(tui, canvas, w, h, 72, 9, "A key for: ${action.label}") { x, y, pw, _ ->
+                canvas.write(x, y, "Press the key to use. Now it is ${tui.keys.names(action)}.", p.text, p.card, max = pw)
+                canvas.write(x, y + 1, "As it came: ${action.defaults.joinToString(" ") { KeyMap.describe(it) }} · ${action.scope.title}", p.subtext, p.card, max = pw)
+                problem?.let { canvas.write(x, y + 3, it, p.warn, p.card, max = pw) }
+                canvas.write(x, y + 5, "Esc to leave it as it is", p.faint, p.card)
+            }
+        }
+
+        override fun handle(tui: Tui, input: Input): Boolean {
+            when {
+                input is Input.Key && input.key == Keys.ESCAPE -> tui.overlays.removeLastOrNull()
+                input is Input.Text && !input.alt && KeyMap.bindable(input.char) -> {
+                    val changed = tui.keys.with(action, input.char)
+                    if (changed == null) {
+                        val other = tui.keys.clash(action, input.char)
+                        problem = if (other != null) {
+                            "${KeyMap.describe(input.char)} is already “${other.label}” (${other.scope.title.lowercase()}). Change that one first."
+                        } else {
+                            "That key cannot be given to anything."
+                        }
+                    } else {
+                        tui.useKeys(changed)
+                        tui.overlays.removeLastOrNull()
+                        tui.toast("${action.label}: ${KeyMap.describe(input.char)}", Row.Tone.GOOD)
+                    }
+                }
+                else -> problem = "Only a letter, a digit or a sign can be a key here."
+            }
+            return true
+        }
+    }
+
+    /**
+     * Something to read before going on, a few short paragraphs long: what signing in to VK means, say. Enter
+     * goes on to [accept]; Escape, or anything else, leaves it.
+     */
+    class Notice(val title: String, val paragraphs: List<String>, val going: String = "Enter to go on", val accept: () -> Unit) : Overlay {
+        override fun draw(tui: Tui, canvas: Canvas, w: Int, h: Int) {
+            val p = tui.palette
+            val width = minOf(84, w - 4)
+            val lines = paragraphs.flatMapIndexed { i, text -> (if (i > 0) listOf("") else emptyList()) + wrapWords(text, width - 4) }
+            panel(tui, canvas, w, h, width, lines.size + 5, title) { x, y, pw, _ ->
+                lines.forEachIndexed { i, line -> canvas.write(x, y + i, line, p.text, p.card, max = pw) }
+                canvas.write(x, y + lines.size + 1, "$going  ·  Esc to leave it", p.faint, p.card, max = pw)
+            }
+        }
+
+        override fun handle(tui: Tui, input: Input): Boolean {
+            tui.overlays.removeLastOrNull()
+            if (input is Input.Key && input.key == Keys.ENTER) accept()
+            return true
+        }
+    }
+
     /** A line of text to type: a playlist's new name, a token, a cookies file. */
     class Prompt(
         val title: String,
@@ -390,6 +469,24 @@ object Overlays {
         }
         return Overlay.Picker("Sleep timer", options)
     }
+}
+
+/** [text] in lines no wider than [width], broken between words where it can be. */
+internal fun wrapWords(text: String, width: Int): List<String> {
+    if (width <= 4 || Canvas.displayWidth(text) <= width) return listOf(text)
+    val out = mutableListOf<String>()
+    var line = ""
+    for (word in text.split(' ')) {
+        val candidate = if (line.isEmpty()) word else "$line $word"
+        if (Canvas.displayWidth(candidate) > width && line.isNotEmpty()) {
+            out += line
+            line = word
+        } else {
+            line = candidate
+        }
+    }
+    if (line.isNotEmpty()) out += line
+    return out
 }
 
 private fun String.dropLastCodePoint(): String {

@@ -50,6 +50,8 @@ sealed interface Row {
         /** Left and right change a setting's value; Enter does [run]. */
         val step: ((Int) -> Unit)? = null,
         val run: () -> Unit = { step?.invoke(1) },
+        /** What Delete does on this row, where there is something to put back: a key changed, say. */
+        val remove: (() -> Unit)? = null,
     ) : Row
 
     enum class Tone { NORMAL, QUIET, GOOD, WARN, BAD, ACCENT }
@@ -109,11 +111,29 @@ fun ProviderType.badge(): String = when (this) {
 }
 
 /**
- * Whether a like given to a track from here goes to the listener's account: YouTube's and SoundCloud's do.
- * Spotify's are read and never written, and Bandcamp and VK have none Noctorium keeps.
+ * Whether a like given to a track from here goes to the listener's account: YouTube's, SoundCloud's,
+ * Spotify's Liked Songs and VK's My music do. Bandcamp has none, and a file on this computer is nobody's.
  */
 val ProviderType.keepsLikes: Boolean
-    get() = this == ProviderType.YOUTUBE_MUSIC || this == ProviderType.YOUTUBE_VIDEO || this == ProviderType.SOUNDCLOUD
+    get() = this != ProviderType.BANDCAMP && this != ProviderType.LOCAL
+
+/**
+ * What a playlist a service listed really is: a whole artist, an album, or a list.
+ *
+ * Bandcamp and Spotify answer a search with their albums and artists as playlists -- which is what lets one
+ * open like any other list -- and say which by the start of the id.
+ */
+enum class ListKind { ARTIST, ALBUM, PLAYLIST }
+
+val Playlist.kind: ListKind
+    get() = when {
+        BandcampMusicProvider.isArtist(this) -> ListKind.ARTIST
+        // Core's own names for these, SpotifyClient.ARTIST_PREFIX and ALBUM_PREFIX, are not visible from here.
+        provider == ProviderType.SPOTIFY && id.startsWith("artist:") -> ListKind.ARTIST
+        provider == ProviderType.BANDCAMP && (id.startsWith("${BandcampMusicProvider.ALBUM}:") || id.startsWith("${BandcampMusicProvider.TRACK}:")) -> ListKind.ALBUM
+        provider == ProviderType.SPOTIFY && id.startsWith("album:") -> ListKind.ALBUM
+        else -> ListKind.PLAYLIST
+    }
 
 fun Palette.badgeColour(provider: ProviderType): Rgb = when (provider) {
     ProviderType.YOUTUBE_MUSIC, ProviderType.YOUTUBE_VIDEO -> youTube
@@ -177,11 +197,12 @@ class ListView(private val palette: () -> Palette, private val state: AppState) 
                     canvas.write(x + 1, ry, if (selected) "›" else " ", p.accent, background)
                     canvas.write(x + 3, ry, pl.provider.badge(), p.badgeColour(pl.provider), background, BOLD)
                     val name = canvas.write(x + 6, ry, pl.title, p.text, background, BOLD, max = (w * 6 / 10).coerceAtLeast(10))
+                    val artist = pl.kind == ListKind.ARTIST
                     val detail = listOfNotNull(
-                        // A Bandcamp artist opens as a playlist of everything they put out, and says what it is;
-                        // what Bandcamp gives as its owner is then where they are.
-                        "Artist".takeIf { BandcampMusicProvider.isArtist(pl) },
-                        pl.ownerName?.takeIf(String::isNotBlank),
+                        // An artist opens as a playlist of what they put out, and says what it is. What Bandcamp
+                        // gives as its owner is then where they are; Spotify's says "Artist" itself.
+                        "Artist".takeIf { artist },
+                        pl.ownerName?.takeIf { it.isNotBlank() && !(artist && it == "Artist") },
                         (pl.trackCount ?: pl.tracks.size.takeIf { it > 0 })?.let { "$it tracks" },
                         when (pl.isPublic) { true -> "public"; false -> "private"; null -> null },
                     ).joinToString(" · ")
