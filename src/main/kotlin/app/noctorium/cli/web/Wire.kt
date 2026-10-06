@@ -16,7 +16,9 @@ import app.noctorium.playback.SleepTimerState
 import app.noctorium.playlists.LocalPlaylist
 import app.noctorium.settings.AutoplaySource
 import app.noctorium.settings.DEFAULT_HYBRID_SEARCH
+import app.noctorium.settings.ProgressBarStyle
 import app.noctorium.settings.ThemePreset
+import app.noctorium.settings.ThemeSkin
 import app.noctorium.settings.resolvedAccent
 import app.noctorium.settings.themeColours
 import kotlinx.serialization.Serializable
@@ -281,6 +283,12 @@ data class WTheme(
     val subtext: String,
     val accent: String,
     val light: Boolean,
+    /**
+     * How the theme is drawn beyond its colours, by ThemeSkin's name: STANDARD for nearly all, WINDOWS_98 and
+     * WINDOWS_XP for the two that draw their bevels, title bars and taskbars, which the page draws from the
+     * same system colours as every other Noctorium.
+     */
+    val skin: String = ThemeSkin.STANDARD.name,
 )
 
 @Serializable
@@ -291,6 +299,8 @@ data class WSettings(
     val accent: String,
     val accents: List<String>,
     val progressBarStyle: String,
+    /** Every seek bar there is, by name, with what each is called and looks like, so the page lists them all. */
+    val progressBarStyles: List<WChoice> = emptyList(),
     val timeDisplay: String,
     val skipNonMusic: Boolean,
     val youtubeHistory: Boolean,
@@ -369,7 +379,7 @@ private fun argb(value: Long) = "#%06x".format(value and 0xFFFFFF)
 
 private fun ThemePreset.wire(custom: app.noctorium.settings.ThemeColours): WTheme {
     val c = colours ?: custom
-    return WTheme(name, displayName, family, argb(c.background), argb(c.panel), argb(c.card), argb(c.text), argb(c.subtext), argb(c.accent), c.light)
+    return WTheme(name, displayName, family, argb(c.background), argb(c.panel), argb(c.card), argb(c.text), argb(c.subtext), argb(c.accent), c.light, skin.name)
 }
 
 /** The parts of the state, each as JSON, by the name the page knows them by. */
@@ -484,6 +494,7 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
                 accent = p.accent.name,
                 accents = app.noctorium.settings.AccentPreset.entries.map { it.name },
                 progressBarStyle = p.progressBarStyle.name,
+                progressBarStyles = ProgressBarStyle.entries.map { WChoice(it.name, it.displayName, it.description) },
                 timeDisplay = p.timeDisplay.name,
                 skipNonMusic = p.skipNonMusic,
                 youtubeHistory = p.youtubeHistory,
