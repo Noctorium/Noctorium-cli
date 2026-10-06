@@ -86,6 +86,21 @@ class CanvasTest {
     }
 }
 
+class ColourFoldTest {
+    @Test
+    fun `a colour is folded to the nearest of the 256, grey or not`() {
+        // XP's beige is a warm grey, not the cube's pink; 98's face is the grey it looks.
+        assertEquals(254, Screen.xterm256(0xEC, 0xE9, 0xD8))
+        assertEquals(250, Screen.xterm256(0xC0, 0xC0, 0xC0))
+        // 98's navy, a pure red and the Night accent stay where they were.
+        assertEquals(18, Screen.xterm256(0x00, 0x00, 0x80))
+        assertEquals(196, Screen.xterm256(0xFF, 0x00, 0x00))
+        assertEquals(141, Screen.xterm256(0xB4, 0x7C, 0xFF))
+        assertEquals(16, Screen.xterm256(0, 0, 0))
+        assertEquals(231, Screen.xterm256(255, 255, 255))
+    }
+}
+
 class ArtTest {
     @Test
     fun `YouTube Music covers are asked for as JPEG`() {

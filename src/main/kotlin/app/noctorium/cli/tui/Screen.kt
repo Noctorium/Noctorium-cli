@@ -164,15 +164,27 @@ class Screen : AutoCloseable {
         }
     }
 
-    private fun xterm256(r: Int, g: Int, b: Int): Int {
-        // The greys, where the colour has none of its own; the 6x6x6 cube otherwise.
-        if (kotlin.math.abs(r - g) < 10 && kotlin.math.abs(g - b) < 10) {
-            val grey = (r + g + b) / 3
-            if (grey < 8) return 16
-            if (grey > 248) return 231
-            return 232 + ((grey - 8) * 24 / 240).coerceIn(0, 23)
+    companion object {
+        /** The levels each channel of xterm's 6x6x6 cube is at. */
+        private val CUBE = intArrayOf(0, 95, 135, 175, 215, 255)
+
+        /**
+         * The nearest of the 256-colour palette's own to [r], [g], [b]: the closest colour of the cube or the
+         * closest of the greys, whichever is nearer. The greys used to be kept for colours whose channels were
+         * all within a few steps of each other, and a colour just outside that -- XP's beige -- went to the cube,
+         * whose nearest to it is pink.
+         */
+        fun xterm256(r: Int, g: Int, b: Int): Int {
+            fun nearest(v: Int) = CUBE.indices.minBy { kotlin.math.abs(CUBE[it] - v) }
+            fun distance(x: Int, y: Int, z: Int) = (x - r) * (x - r) + (y - g) * (y - g) + (z - b) * (z - b)
+            val cr = nearest(r)
+            val cg = nearest(g)
+            val cb = nearest(b)
+            // The 24 greys run from 8 to 238 in steps of ten.
+            val grey = (((r + g + b) / 3 - 3) / 10).coerceIn(0, 23)
+            val level = 8 + 10 * grey
+            return if (distance(level, level, level) < distance(CUBE[cr], CUBE[cg], CUBE[cb])) 232 + grey
+            else 16 + 36 * cr + 6 * cg + cb
         }
-        fun level(v: Int) = if (v < 48) 0 else if (v < 115) 1 else (v - 35) / 40
-        return 16 + 36 * level(r) + 6 * level(g) + level(b)
     }
 }
