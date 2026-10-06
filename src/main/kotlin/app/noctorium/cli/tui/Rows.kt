@@ -59,6 +59,8 @@ sealed interface Row {
         val run: () -> Unit = { step?.invoke(1) },
         /** What Delete does on this row, where there is something to put back: a key changed, say. */
         val remove: (() -> Unit)? = null,
+        /** What the value means, said after it while the row is chosen: a layout's name alone says little. */
+        val detail: String? = null,
     ) : Row
 
     enum class Tone { NORMAL, QUIET, GOOD, WARN, BAD, ACCENT }
@@ -227,7 +229,9 @@ class ListView(private val palette: () -> Palette, private val state: AppState) 
                     val valueX = maxOf(x + 3 + labelWidth + 2, x + w / 2)
                     row.value?.let { value ->
                         val shown = if (row.step != null && selected) "‹ $value ›" else value
-                        canvas.write(valueX, ry, shown, if (selected) p.accent else p.subtext, background, BOLD, max = x + w - valueX - 1)
+                        val used = canvas.write(valueX, ry, shown, if (selected) p.accent else p.subtext, background, BOLD, max = x + w - valueX - 1)
+                        val room = x + w - (valueX + used + 2) - 1
+                        if (selected && row.detail != null && room > 12) canvas.write(valueX + used + 2, ry, row.detail, p.faint, background, max = room)
                     }
                     if (row.value == null && row.hint != null) {
                         canvas.write(valueX, ry, row.hint, p.faint, background, max = x + w - valueX - 1)

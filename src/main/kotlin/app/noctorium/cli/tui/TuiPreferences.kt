@@ -20,6 +20,8 @@ class TuiPreferences(
      * key added in a later version arrives with its own. See [KeyMap].
      */
     var keys: Map<String, List<String>> = emptyMap(),
+    /** How the player bar along the foot of the screen is laid out. */
+    var playerBar: TuiPlayerBar = TuiPlayerBar.FULL,
 ) {
     fun save() {
         val path = AppDirectories.resolve("terminal.json") ?: return
@@ -30,11 +32,39 @@ class TuiPreferences(
     }
 
     companion object {
-        private val json = Json { ignoreUnknownKeys = true; prettyPrint = true; encodeDefaults = true }
+        /**
+         * Forgiving about what it does not know, as core's settings file is: a layout added in a later version
+         * and read by an earlier one falls back to that one choice's default, rather than failing the whole file
+         * and taking the keys with it.
+         */
+        private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true; prettyPrint = true; encodeDefaults = true }
 
         fun load(): TuiPreferences {
             val path = AppDirectories.resolve("terminal.json")?.takeIf(Files::isRegularFile) ?: return TuiPreferences()
-            return runCatching { json.decodeFromString(serializer(), Files.readString(path)) }.getOrDefault(TuiPreferences())
+            return runCatching { read(Files.readString(path)) }.getOrDefault(TuiPreferences())
         }
+
+        /** The preferences [text] describes. */
+        internal fun read(text: String): TuiPreferences = json.decodeFromString(serializer(), text)
     }
+}
+
+/**
+ * How the player bar is laid out in a terminal. The desktop's and the phone's bars are chosen apart, in their
+ * own settings; a bar made of a few rows of cells wants choices of its own.
+ */
+@Serializable
+enum class TuiPlayerBar(val displayName: String, val description: String) {
+    FULL(
+        "Full",
+        "The cover, the track, the controls over the seek bar, and the volume and what is next.",
+    ),
+    COMPACT(
+        "Compact",
+        "One row: play, the track, the seek bar and the times, so the page has the rest of the screen.",
+    ),
+    TASKBAR(
+        "Taskbar",
+        "A desktop's taskbar: a start button that opens Now playing, the song as a pressed button, and a tray with the volume and the clock.",
+    ),
 }

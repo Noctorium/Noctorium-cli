@@ -31,7 +31,7 @@ import java.nio.file.Path
  *
  * Accounts first, because nothing much happens until one is signed in; then how it looks; then the rest.
  * Every value here is the same setting the desktop has, kept in this program's own settings file -- except
- * the two that only mean something in a terminal, which live in [TuiPreferences].
+ * the ones that only mean something in a terminal, such as the layouts, which live in [TuiPreferences].
  */
 object Settings {
     private val io = CoroutineScope(Dispatchers.IO)
@@ -234,7 +234,18 @@ object Settings {
             }),
         )
         add(Row.Action("Accent", value = preferences.accent.displayName, step = { by -> state.setAccent(cycle(AccentPreset.entries, preferences.accent, by)) }))
-        add(Row.Action("Seek bar", value = preferences.progressBarStyle.displayName, step = { by -> state.setProgressBarStyle(cycle(ProgressBarStyle.entries, preferences.progressBarStyle, by)) }))
+        add(
+            Row.Action("Seek bar", value = preferences.progressBarStyle.displayName, detail = preferences.progressBarStyle.description, step = { by ->
+                state.setProgressBarStyle(cycle(ProgressBarStyle.entries, preferences.progressBarStyle, by))
+            }),
+        )
+        val bar = tui.preferences.playerBar
+        add(
+            Row.Action("Player bar", value = bar.displayName, detail = bar.description, step = { by ->
+                tui.preferences.playerBar = cycle(TuiPlayerBar.entries, bar, by)
+                tui.preferences.save()
+            }),
+        )
         add(Row.Action("Time on the right", value = preferences.timeDisplay.displayName, step = { by -> state.setTimeDisplay(cycle(TimeDisplay.entries, preferences.timeDisplay, by)) }))
         add(
             Row.Action("Background", value = if (tui.preferences.terminalBackground) "The terminal's own" else "The theme's", step = {

@@ -115,7 +115,21 @@ class TuiRenderCheck {
             state.setProgressBarStyle(ProgressBarStyle.CLASSIC)
             tui.page = Page.SEARCH
             write(folder, "search-98", tui, 100, 32)
+
+            // The player bar's layouts, in a dark theme and a light one, wide and narrow, over the queue.
+            tui.page = Page.QUEUE
+            for ((theme, style) in listOf(ThemePreset.NOCTORIUM_NIGHT to ProgressBarStyle.BARS, ThemePreset.CATPPUCCIN_LATTE to ProgressBarStyle.RULER)) {
+                state.setTheme(theme)
+                state.setProgressBarStyle(style)
+                for (bar in TuiPlayerBar.entries) {
+                    tui.preferences.playerBar = bar
+                    val name = "bar-${bar.name.lowercase()}-${theme.name.lowercase()}"
+                    write(folder, name, tui)
+                    write(folder, "$name-narrow", tui, 84, 24)
+                }
+            }
         } finally {
+            tui.preferences.playerBar = TuiPlayerBar.FULL
             state.setTheme(ThemePreset.NOCTORIUM_NIGHT)
             state.setProgressBarStyle(ProgressBarStyle.MINIMAL)
             state.close()
