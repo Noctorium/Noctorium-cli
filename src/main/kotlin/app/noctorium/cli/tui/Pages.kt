@@ -27,18 +27,27 @@ object Pages {
         when (tui.page) {
             Page.NOW_PLAYING -> NowPlaying.draw(tui, canvas, x, y, w, h)
             Page.SEARCH -> {
-                title(canvas, p, x, y, w, "Search", subtitle(tui))
+                title(tui, canvas, x, y, w, "Search", subtitle(tui))
                 searchBox(tui, canvas, x + 2, y + 2, w - 4)
+                // The search modes' row is right above the list, so a well has no room for its top edge there.
+                if (p.skinned) Skin.well(canvas, p, x + 1, y + 6, w - 2, h - 6, top = false)
                 tui.listView.draw(canvas, rows(tui), tui.list(key(tui)), x + 1, y + 6, w - 2, h - 6, focused = !tui.searchFocused)
             }
             else -> {
-                title(canvas, p, x, y, w, heading(tui), subtitle(tui))
+                title(tui, canvas, x, y, w, heading(tui), subtitle(tui))
+                if (p.skinned) Skin.well(canvas, p, x + 1, y + LIST_TOP, w - 2, h - LIST_TOP)
                 tui.listView.draw(canvas, rows(tui), tui.list(key(tui)), x + 1, y + LIST_TOP, w - 2, h - LIST_TOP)
             }
         }
     }
 
-    private fun title(canvas: Canvas, p: Palette, x: Int, y: Int, w: Int, title: String, subtitle: String?) {
+    /** The page's title and what it is showing, or, in the Windows themes, a title bar saying the same. */
+    private fun title(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int, title: String, subtitle: String?) {
+        val p = tui.palette
+        if (p.skinned) {
+            Skin.titleBar(tui, canvas, x + 1, y + 1, w - 2, title, subtitle)
+            return
+        }
         val used = canvas.write(x + 2, y + 1, title, p.text, null, BOLD, max = w / 2)
         subtitle?.let { canvas.write(x + 4 + used, y + 1, it, p.subtext, null, max = w - used - 6) }
     }
@@ -398,6 +407,7 @@ object Pages {
 
     fun searchBox(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int) {
         val p = tui.palette
+        if (p.skinned) return skinnedSearchBox(tui, canvas, x, y, w)
         val focused = tui.searchFocused
         val field = p.card
         canvas.box(x, y, w, 3, if (focused) p.accent else p.line, field)
@@ -419,6 +429,33 @@ object Pages {
             val target = mode
             tui.clickTargets += Tui.ClickTarget(cx, y + 3, used, 1) { tui.state.setSearchMode(target) }
             cx += used + 1
+        }
+    }
+
+    /**
+     * The search box as the Windows themes draw it: a white field sunk into the face, and the services to ask as a
+     * row of radio buttons under it.
+     */
+    private fun skinnedSearchBox(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int) {
+        val p = tui.palette
+        val focused = tui.searchFocused
+        Skin.well(canvas, p, x + 1, y + 1, w - 2, 1, foot = true)
+        canvas.write(x + 2, y + 1, "⌕", if (focused) p.accent else Skin.greyText(p), null, BOLD)
+        if (tui.searchText.isEmpty()) {
+            canvas.write(x + 4, y + 1, "Songs, artists, playlists — or paste a link", Skin.greyText(p), null, ITALIC, max = w - 6)
+        } else {
+            val used = canvas.write(x + 4, y + 1, tui.searchText.takeLast(w - 8), Skin.text(p), null, max = w - 7)
+            if (focused) canvas.set(x + 4 + used, y + 1, "▏", Skin.text(p), null, BOLD)
+        }
+        tui.clickTargets += Tui.ClickTarget(x, y, w, 3) { tui.searchFocused = true }
+        var cx = x + 1
+        SearchMode.entries.forEach { mode ->
+            val active = tui.state.ui.value.searchMode == mode
+            Skin.radio(canvas, p, cx, y + 3, active)
+            val used = 2 + canvas.write(cx + 2, y + 3, mode.displayName, Skin.text(p), null, if (active) BOLD else 0)
+            val target = mode
+            tui.clickTargets += Tui.ClickTarget(cx, y + 3, used, 1) { tui.state.setSearchMode(target) }
+            cx += used + 3
         }
     }
 

@@ -254,8 +254,14 @@ object Settings {
             }),
         )
         add(Row.Action("Time on the right", value = preferences.timeDisplay.displayName, step = { by -> state.setTimeDisplay(cycle(TimeDisplay.entries, preferences.timeDisplay, by)) }))
+        // The Windows themes are slabs of their own grey or beige, and keep it whichever this says: see Palette.
+        val background = when {
+            !tui.preferences.terminalBackground -> "The theme's"
+            tui.palette.skinned -> "The terminal's own, except in the Windows themes"
+            else -> "The terminal's own"
+        }
         add(
-            Row.Action("Background", value = if (tui.preferences.terminalBackground) "The terminal's own" else "The theme's", step = {
+            Row.Action("Background", value = background, step = {
                 tui.preferences.terminalBackground = !tui.preferences.terminalBackground
                 tui.preferences.save()
                 tui.screen.invalidate()

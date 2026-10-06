@@ -15,9 +15,30 @@ sealed interface Overlay {
 
     fun mouse(tui: Tui, input: Input.Mouse): Boolean = true
 
-    /** A centred panel, its contents drawn by [body] into the area inside its border. */
+    /** Puts it away, as Escape does; the ones with something to hand back on the way out say so. */
+    fun close(tui: Tui) {
+        tui.overlays.removeLastOrNull()
+    }
+
+    /** What the panel's contents are written on: its card, or the face of a Windows theme's window. */
+    fun surface(p: Palette): Rgb = if (p.skinned) Skin.face(p) else p.card
+
+    /**
+     * A centred panel, its contents drawn by [body] into the area inside its border. In the Windows themes it is
+     * one of their windows instead, with a row of its face under the title bar as theirs had, and a close button
+     * that does what Escape does; [body] may then draw in the row under its area too, which is the window's own.
+     */
     fun panel(tui: Tui, canvas: Canvas, w: Int, h: Int, width: Int, height: Int, title: String, body: (x: Int, y: Int, w: Int, h: Int) -> Unit) {
         val p = tui.palette
+        if (p.skinned) {
+            val pw = minOf(width, w - 4)
+            val ph = minOf(height + 1, h - 3)
+            val x = (w - pw) / 2
+            val y = (h - ph) / 2
+            Skin.window(tui, canvas, x, y, pw, ph, title) { close(tui) }
+            canvas.clipped(x + 2, y + 2, pw - 4, ph - 2) { body(x + 2, y + 2, pw - 4, ph - 3) }
+            return
+        }
         val pw = minOf(width, w - 4)
         val ph = minOf(height, h - 2)
         val x = (w - pw) / 2
@@ -77,16 +98,17 @@ sealed interface Overlay {
 
         override fun draw(tui: Tui, canvas: Canvas, w: Int, h: Int) {
             val p = tui.palette
+            val bg = surface(p)
             val keys = keys(tui)
             val lines = keys.sumOf { it.second.size + 2 }
             panel(tui, canvas, w, h, 92, lines + 3, "Keys") { x, y, pw, _ ->
                 var row = y
                 keys.forEach { (section, entries) ->
-                    canvas.write(x, row, section.uppercase(), p.accent, p.card, BOLD)
+                    canvas.write(x, row, section.uppercase(), p.accent, bg, BOLD)
                     row++
                     entries.forEach { (key, what) ->
-                        canvas.write(x + 1, row, key, p.text, p.card, BOLD, max = 18)
-                        canvas.write(x + 20, row, what, p.subtext, p.card, max = pw - 21)
+                        canvas.write(x + 1, row, key, p.text, bg, BOLD, max = 18)
+                        canvas.write(x + 20, row, what, p.subtext, bg, max = pw - 21)
                         row++
                     }
                     row++
@@ -112,18 +134,24 @@ sealed interface Overlay {
             val width = (options.maxOfOrNull { Canvas.displayWidth(it.first) } ?: 10).plus(10).coerceIn(36, 80)
             panel(tui, canvas, w, h, width, visible + 3 + (if (note != null) 2 else 0), title) { x, y, pw, _ ->
                 top = y; left = x
-                val rows = options.map { Row.Action(it.first) }
                 list.follow(visible)
+                // In the Windows themes, a list box: white, sunk into the window, the choice in its selection.
+                if (p.skinned) Skin.well(canvas, p, x, y, pw, visible)
                 for (i in 0 until visible) {
                     val index = list.offset + i
                     val option = options.getOrNull(index) ?: break
                     val selected = index == list.selected
+                    if (p.skinned) {
+                        val back = if (selected) Skin.selection(p) else Skin.window(p)
+                        canvas.fill(x, y + i, pw, 1, back)
+                        canvas.write(x + 1, y + i, option.first, if (selected) Skin.selectionText(p) else Skin.text(p), back, if (selected) BOLD else 0, max = pw - 2)
+                        continue
+                    }
                     if (selected) canvas.fill(x - 1, y + i, pw + 2, 1, p.selection)
                     canvas.write(x, y + i, if (selected) "›" else " ", p.accent, if (selected) p.selection else p.card)
                     canvas.write(x + 2, y + i, option.first, if (selected) p.text else p.subtext, if (selected) p.selection else p.card, if (selected) BOLD else 0, max = pw - 3)
                 }
-                rows.size
-                note?.let { canvas.write(x, y + visible + 1, it, p.faint, p.card, ITALIC, max = pw) }
+                note?.let { canvas.write(x, y + visible + 1, it, p.faint, surface(p), ITALIC, max = pw) }
             }
         }
 
@@ -200,7 +228,7 @@ sealed interface Overlay {
             if (!ticked.remove(index)) ticked += index
         }
 
-        private fun close(tui: Tui) {
+        override fun close(tui: Tui) {
             tui.overlays.removeLastOrNull()
             done(ticked.toList())
         }
@@ -213,18 +241,28 @@ sealed interface Overlay {
                 top = y
                 shown = visible
                 list.follow(visible)
+                // In the Windows themes, a list box of check boxes, white and sunk into the window.
+                if (p.skinned) Skin.well(canvas, p, x, y, pw, visible)
                 for (i in 0 until visible) {
                     val index = list.offset + i
                     val label = labels.getOrNull(index) ?: break
                     val selected = index == list.selected
                     val on = index in ticked
+                    if (p.skinned) {
+                        val back = if (selected) Skin.selection(p) else Skin.window(p)
+                        val colour = if (selected) Skin.selectionText(p) else Skin.text(p)
+                        canvas.fill(x, y + i, pw, 1, back)
+                        canvas.write(x + 1, y + i, if (on) "[✓]" else "[ ]", colour, back, BOLD)
+                        canvas.write(x + 5, y + i, label, colour, back, if (selected) BOLD else 0, max = pw - 6)
+                        continue
+                    }
                     val back = if (selected) p.selection else p.card
                     if (selected) canvas.fill(x - 1, y + i, pw + 2, 1, p.selection)
                     canvas.write(x, y + i, if (selected) "›" else " ", p.accent, back)
                     canvas.write(x + 2, y + i, if (on) "✓" else "·", if (on) p.accent else p.faint, back, BOLD)
                     canvas.write(x + 4, y + i, label, if (on || selected) p.text else p.subtext, back, if (selected) BOLD else 0, max = pw - 5)
                 }
-                note?.let { canvas.write(x, y + visible + 1, it, p.faint, p.card, ITALIC, max = pw) }
+                note?.let { canvas.write(x, y + visible + 1, it, p.faint, surface(p), ITALIC, max = pw) }
             }
         }
 
@@ -271,11 +309,12 @@ sealed interface Overlay {
 
         override fun draw(tui: Tui, canvas: Canvas, w: Int, h: Int) {
             val p = tui.palette
+            val bg = surface(p)
             panel(tui, canvas, w, h, 72, 9, "A key for: ${action.label}") { x, y, pw, _ ->
-                canvas.write(x, y, "Press the key to use. Now it is ${tui.keys.names(action)}.", p.text, p.card, max = pw)
-                canvas.write(x, y + 1, "As it came: ${action.defaults.joinToString(" ") { KeyMap.describe(it) }} · ${action.scope.title}", p.subtext, p.card, max = pw)
-                problem?.let { canvas.write(x, y + 3, it, p.warn, p.card, max = pw) }
-                canvas.write(x, y + 5, "Esc to leave it as it is", p.faint, p.card)
+                canvas.write(x, y, "Press the key to use. Now it is ${tui.keys.names(action)}.", p.text, bg, max = pw)
+                canvas.write(x, y + 1, "As it came: ${action.defaults.joinToString(" ") { KeyMap.describe(it) }} · ${action.scope.title}", p.subtext, bg, max = pw)
+                problem?.let { canvas.write(x, y + 3, it, p.warn, bg, max = pw) }
+                canvas.write(x, y + 5, "Esc to leave it as it is", p.faint, bg)
             }
         }
 
@@ -313,8 +352,8 @@ sealed interface Overlay {
             val width = minOf(84, w - 4)
             val lines = paragraphs.flatMapIndexed { i, text -> (if (i > 0) listOf("") else emptyList()) + wrapWords(text, width - 4) }
             panel(tui, canvas, w, h, width, lines.size + 5, title) { x, y, pw, _ ->
-                lines.forEachIndexed { i, line -> canvas.write(x, y + i, line, p.text, p.card, max = pw) }
-                canvas.write(x, y + lines.size + 1, "$going  ·  Esc to leave it", p.faint, p.card, max = pw)
+                lines.forEachIndexed { i, line -> canvas.write(x, y + i, line, p.text, surface(p), max = pw) }
+                canvas.write(x, y + lines.size + 1, "$going  ·  Esc to leave it", p.faint, surface(p), max = pw)
             }
         }
 
@@ -338,10 +377,23 @@ sealed interface Overlay {
         override fun draw(tui: Tui, canvas: Canvas, w: Int, h: Int) {
             val p = tui.palette
             panel(tui, canvas, w, h, 72, 7, title) { x, y, pw, _ ->
-                canvas.write(x, y, hint, p.subtext, p.card, max = pw)
-                canvas.fill(x, y + 2, pw, 1, p.page.takeIf { it != DEFAULT } ?: p.panel)
+                canvas.write(x, y, hint, p.subtext, surface(p), max = pw)
                 val shown = if (secret) "•".repeat(text.length) else text
                 val visible = shown.takeLast(pw - 2)
+                if (p.skinned) {
+                    // A white field sunk into the window, and the dialog's two buttons under it at the right.
+                    Skin.well(canvas, p, x, y + 2, pw, 1, foot = true)
+                    val used = canvas.write(x + 1, y + 2, visible, Skin.text(p), null)
+                    canvas.set(x + 1 + used, y + 2, "▏", Skin.text(p), null, BOLD)
+                    val cancelX = x + pw - 10
+                    val okX = cancelX - 9
+                    Skin.button(canvas, p, okX, y + 4, " OK ", default = true, roomAbove = false)
+                    Skin.button(canvas, p, cancelX, y + 4, "Cancel", roomAbove = false)
+                    tui.clickTargets += Tui.ClickTarget(okX, y + 4, 8, 1) { tui.overlays.removeLastOrNull(); submit(text.trim()) }
+                    tui.clickTargets += Tui.ClickTarget(cancelX, y + 4, 10, 1) { close(tui) }
+                    return@panel
+                }
+                canvas.fill(x, y + 2, pw, 1, p.page.takeIf { it != DEFAULT } ?: p.panel)
                 val used = canvas.write(x + 1, y + 2, visible, p.text, p.page.takeIf { it != DEFAULT } ?: p.panel)
                 canvas.set(x + 1 + used, y + 2, "▏", p.accent, p.page.takeIf { it != DEFAULT } ?: p.panel, BOLD)
                 canvas.write(x, y + 4, "Enter to save  ·  Esc to cancel", p.faint, p.card)
@@ -372,9 +424,17 @@ sealed interface Overlay {
         override fun draw(tui: Tui, canvas: Canvas, w: Int, h: Int) {
             val p = tui.palette
             panel(tui, canvas, w, h, 64, if (detail != null) 7 else 6, "Are you sure?") { x, y, pw, _ ->
-                canvas.write(x, y, question, p.text, p.card, BOLD, max = pw)
-                detail?.let { canvas.write(x, y + 1, it, p.subtext, p.card, max = pw) }
+                canvas.write(x, y, question, p.text, surface(p), BOLD, max = pw)
+                detail?.let { canvas.write(x, y + 1, it, p.subtext, surface(p), max = pw) }
                 val row = y + if (detail != null) 3 else 2
+                if (p.skinned) {
+                    // The dialog's buttons, their keys underlined as Windows underlined them.
+                    val yesW = Skin.button(canvas, p, x, row, " Yes ", mnemonic = 1, default = true)
+                    val noW = Skin.button(canvas, p, x + yesW + 2, row, " No ", mnemonic = 1)
+                    tui.clickTargets += Tui.ClickTarget(x, row, yesW, 1) { tui.overlays.removeLastOrNull(); yes() }
+                    tui.clickTargets += Tui.ClickTarget(x + yesW + 2, row, noW, 1) { close(tui) }
+                    return@panel
+                }
                 canvas.write(x, row, " y  Yes ", p.onAccent, p.accent, BOLD)
                 canvas.write(x + 10, row, " n  No ", p.text, p.selection, BOLD)
             }
@@ -416,19 +476,21 @@ sealed interface Overlay {
                     }
                     row++
                 } else {
-                    canvas.write(x, row, "Make the window taller to see the code.", p.warn, p.card, max = pw)
+                    canvas.write(x, row, "Make the window taller to see the code.", p.warn, surface(p), max = pw)
                     row += 2
                 }
-                lines.forEach { line -> canvas.writeCentred(x, pw, row, line, p.text, p.card); row++ }
-                canvas.writeCentred(x, pw, row, "Esc to close", p.faint, p.card)
+                lines.forEach { line -> canvas.writeCentred(x, pw, row, line, p.text, surface(p)); row++ }
+                canvas.writeCentred(x, pw, row, "Esc to close", p.faint, surface(p))
             }
         }
 
+        override fun close(tui: Tui) {
+            tui.overlays.removeLastOrNull()
+            onClose()
+        }
+
         override fun handle(tui: Tui, input: Input): Boolean {
-            if (input is Input.Key && (input.key == Keys.ESCAPE || input.key == Keys.ENTER) || input is Input.Text && input.char == "q") {
-                tui.overlays.removeLastOrNull()
-                onClose()
-            }
+            if (input is Input.Key && (input.key == Keys.ESCAPE || input.key == Keys.ENTER) || input is Input.Text && input.char == "q") close(tui)
             return true
         }
     }
@@ -438,10 +500,10 @@ sealed interface Overlay {
         override fun draw(tui: Tui, canvas: Canvas, w: Int, h: Int) {
             val p = tui.palette
             panel(tui, canvas, w, h, minOf(maxOf(Canvas.displayWidth(url) + 8, 60), w - 4), 8, if (opened) "Opened in your browser" else "Open this link") { x, y, pw, _ ->
-                canvas.write(x, y, if (opened) "If nothing appeared, open it yourself:" else "No browser could be opened here. Open this on any device:", p.subtext, p.card, max = pw)
+                canvas.write(x, y, if (opened) "If nothing appeared, open it yourself:" else "No browser could be opened here. Open this on any device:", p.subtext, surface(p), max = pw)
                 // OSC 8 makes it clickable in the terminals that support it; the text itself is the fallback.
-                canvas.write(x, y + 2, url, p.accent, p.card, UNDERLINE, max = pw)
-                canvas.write(x, y + 4, "c to copy  ·  Esc to close", p.faint, p.card)
+                canvas.write(x, y + 2, url, p.accent, surface(p), UNDERLINE, max = pw)
+                canvas.write(x, y + 4, "c to copy  ·  Esc to close", p.faint, surface(p))
             }
         }
 

@@ -185,7 +185,13 @@ class ListView(private val palette: () -> Palette, private val state: AppState) 
             val row = rows.getOrNull(index) ?: break
             lines[y + line] = index
             val selected = index == list.selected && row.selectable
-            val background = if (selected) (if (focused) p.selection else mix(p.panel.takeIf { it != DEFAULT } ?: 0, p.selection, .5f)) else null
+            val background = when {
+                !selected -> null
+                // The Windows themes' selection: navy or Luna's blue while the list has the keys, grey while not.
+                p.skinned -> if (focused) Skin.selection(p) else Skin.face(p)
+                focused -> p.selection
+                else -> mix(p.panel.takeIf { it != DEFAULT } ?: 0, p.selection, .5f)
+            }
             if (background != null) canvas.fill(x, y + line, w, 1, background)
             val ry = y + line
             when (row) {
@@ -238,9 +244,13 @@ class ListView(private val palette: () -> Palette, private val state: AppState) 
                     }
                 }
             }
+            // Everything on the Windows themes' selection is written in its white, as a list of theirs was.
+            if (selected && focused && p.skinned) canvas.recolour(x, ry, w, 1, Skin.selectionText(p))
         }
-        // A scroll mark, so a long list says it goes on.
-        if (rows.size > h && h > 2) {
+        // A scroll mark, so a long list says it goes on: in the Windows themes, a scroll bar of theirs.
+        if (p.skinned) {
+            Skin.scrollBar(canvas, p, x + w - 1, y, h, list.offset, h, rows.size)
+        } else if (rows.size > h && h > 2) {
             val thumb = (h * h / rows.size).coerceIn(1, h)
             val at = ((h - thumb) * list.offset / (rows.size - h).coerceAtLeast(1)).coerceIn(0, h - thumb)
             for (i in 0 until h) canvas.set(x + w - 1, y + i, if (i in at until at + thumb) "┃" else "│", if (i in at until at + thumb) p.accent else p.line)

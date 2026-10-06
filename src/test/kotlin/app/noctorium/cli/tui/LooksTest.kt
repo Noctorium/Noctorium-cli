@@ -8,6 +8,8 @@ import app.noctorium.domain.Track
 import app.noctorium.playback.PlaybackEngine
 import app.noctorium.playback.PlaybackState
 import app.noctorium.playback.PlaybackStatus
+import app.noctorium.settings.NoctoriumPreferences
+import app.noctorium.settings.ThemePreset
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -155,6 +157,74 @@ class LooksTest {
         val head = page.indexOfFirst { "|◀" in it && "1:34" in it }
         assertTrue(head in 1..6, page.joinToString("\n"))
         assertTrue(page.subList(1, head).any { "Awake" in it }, page.joinToString("\n"))
+    }
+
+    private fun theme(theme: ThemePreset) {
+        state.setTheme(theme)
+        waitFor { state.settings.value.preferences.theme == theme }
+    }
+
+    @Test
+    fun `the Windows themes put the player in a title bar whose close button asks before it closes`() {
+        theme(ThemePreset.WINDOWS_98)
+        tui.page = Page.QUEUE
+        val canvas = render()
+        // Navy at its left end, running towards 98's lighter blue along it, with the close button at its right.
+        assertEquals(W98.TITLE, canvas.bg[0])
+        assertEquals(mix(W98.TITLE, W98.TITLE_END, 100 / 149f), canvas.bg[100])
+        assertEquals("×", canvas.text[147])
+        click(canvas, "×", row = 0)
+        val confirm = tui.overlays.last()
+        assertTrue(confirm is Overlay.Confirm && confirm.question == "Close Noctorium?")
+        assertTrue(tui.running)
+        tui.press(Input.Text("y"))
+        assertEquals(false, tui.running)
+    }
+
+    @Test
+    fun `a Windows theme's dialog closes from its close button, and its buttons are pressed with the mouse`() {
+        theme(ThemePreset.WINDOWS_XP)
+        tui.page = Page.QUEUE
+        var answered = 0
+        tui.overlays.addLast(Overlay.Confirm("Clear the queue?", "Playback stops too.") { answered++ })
+        var canvas = render()
+        val title = lines(canvas).indexOfFirst { "Are you sure?" in it }
+        click(canvas, "×", row = title)
+        assertTrue(tui.overlays.isEmpty())
+        assertEquals(0, answered)
+
+        tui.overlays.addLast(Overlay.Confirm("Clear the queue?") { answered++ })
+        canvas = render()
+        click(canvas, " Yes ", row = lines(canvas).indexOfFirst { " Yes " in it })
+        assertTrue(tui.overlays.isEmpty())
+        assertEquals(1, answered)
+
+        var saved: String? = null
+        tui.overlays.addLast(Overlay.Prompt("Rename", "A new name.", "Night drive") { saved = it })
+        canvas = render()
+        click(canvas, " OK ", row = lines(canvas).indexOfFirst { " OK " in it })
+        assertEquals("Night drive", saved)
+    }
+
+    @Test
+    fun `a Windows theme's list picks out its row in its own selection, written in white`() {
+        playing()
+        theme(ThemePreset.WINDOWS_98)
+        tui.page = Page.QUEUE
+        val canvas = render()
+        val row = lines(canvas).indexOfFirst { "Awake" in it && "Tycho" in it && it.indexOf("Awake") > 22 }
+        val at = row * canvas.width + lines(canvas)[row].indexOf("Awake")
+        assertEquals(W98.SELECTION, canvas.bg[at])
+        assertEquals(W98.SELECTION_TEXT, canvas.fg[at])
+    }
+
+    @Test
+    fun `the Windows themes keep their own page when the terminal's background is asked for, and the others give it up`() {
+        fun page(theme: ThemePreset) = Palette.from(NoctoriumPreferences(theme = theme), null, ownBackground = true).page
+        assertEquals(0xC0C0C0, page(ThemePreset.WINDOWS_98))
+        assertEquals(0xECE9D8, page(ThemePreset.WINDOWS_XP))
+        assertEquals(DEFAULT, page(ThemePreset.NOCTORIUM_NIGHT))
+        assertEquals(DEFAULT, page(ThemePreset.CATPPUCCIN_LATTE))
     }
 
     @Test

@@ -15,7 +15,10 @@ import app.noctorium.settings.themeSkin
  * "Match the artwork", which here follows the cover drawn in the player bar. [ownBackground] leaves the page
  * the terminal's own colour, for anybody whose terminal has a background they chose on purpose.
  *
- * The two Windows themes are drawn as themselves as well, by their [skin]: see [Skin].
+ * The two Windows themes are drawn as themselves as well, by their [skin]: see [Skin]. Their page is always
+ * their own grey or beige, whatever [ownBackground] says: everything a skin draws is a slab of that colour --
+ * a window's face, a title bar, a taskbar -- with black writing on it, which a dark terminal's own background
+ * would swallow.
  */
 data class Palette(
     val page: Rgb,
@@ -52,9 +55,10 @@ data class Palette(
             } else {
                 rgb(preferences.resolvedAccent(null))
             }
+            val own = ownBackground && preferences.themeSkin == ThemeSkin.STANDARD
             return Palette(
-                page = if (ownBackground) DEFAULT else rgb(colours.background),
-                panel = if (ownBackground) DEFAULT else rgb(colours.panel),
+                page = if (own) DEFAULT else rgb(colours.background),
+                panel = if (own) DEFAULT else rgb(colours.panel),
                 card = rgb(colours.card),
                 text = rgb(colours.text),
                 subtext = rgb(colours.subtext),

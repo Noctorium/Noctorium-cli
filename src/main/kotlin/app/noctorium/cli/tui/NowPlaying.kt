@@ -59,6 +59,7 @@ object NowPlaying {
         val top = y + 1
         if (tui.preferences.coverArt) {
             tui.art.draw(canvas, tui.art.get(track.artworkUrl), left, top, coverCols, coverRows, p.card, p.faint, round = round(tui))
+            if (p.skinned) Skin.frame(canvas, p, left, top, coverCols, coverRows)
         }
         val infoY = top + (if (tui.preferences.coverArt) coverRows + 1 else 0)
         val infoW = if (wide) coverCols else w - 6
@@ -156,6 +157,7 @@ object NowPlaying {
         val cols = rows * 2
         var row = y + ((h - rows - under) / 2).coerceAtLeast(1)
         tui.art.draw(canvas, tui.art.get(track.artworkUrl), x + (w - cols) / 2, row, cols, rows, p.card, p.faint, round = round(tui))
+        if (p.skinned) Skin.frame(canvas, p, x + (w - cols) / 2, row, cols, rows)
         row += rows + 1
         canvas.writeCentred(x, w, row++, track.title, p.text, null, BOLD)
         val album = track.album?.title?.takeIf { it.isNotBlank() && it != track.title }
@@ -195,6 +197,7 @@ object NowPlaying {
         var textX = left
         if (tui.preferences.coverArt) {
             tui.art.draw(canvas, tui.art.get(track.artworkUrl), left, top, 8, 4, p.card, p.faint, round = round(tui))
+            if (p.skinned) Skin.frame(canvas, p, left, top, 8, 4)
             textX += 10
         }
         val textW = x + w - textX - 2
@@ -202,7 +205,7 @@ object NowPlaying {
         val album = track.album?.title?.takeIf { it.isNotBlank() && it != track.title }
         canvas.write(textX, top + 1, listOfNotNull(track.artistLine, album).joinToString(" · "), p.subtext, null, max = textW)
         val controlsW = PlayerBar.TRANSPORT_WIDTH
-        PlayerBar.transport(tui, canvas, textX, top + 3, p.page)
+        PlayerBar.transport(tui, canvas, textX, top + 3, p.page, roomBelow = true)
         PlayerBar.seek(tui, canvas, textX + controlsW + 2, top + 3, textW - controlsW - 2, p.page, roomAbove = true)
         val liked = tui.state.likes.value.isLiked(track)
         val heart = when {
@@ -311,12 +314,17 @@ object NowPlaying {
         result.attribution?.let { if (offset + bodyH >= wrapped.size) canvas.write(x, y + h - 1, it, p.faint, null, ITALIC, max = w) }
     }
 
-    /** The lyrics sources as chips, the chosen one filled in; clicking one chooses it. */
+    /**
+     * The lyrics sources as chips, the chosen one filled in -- or, in the Windows themes, as a row of their radio
+     * buttons, which is what choosing one of several was in them. Clicking one chooses it.
+     */
     private fun chips(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int, centred: Boolean) {
         val p = tui.palette
         val state = tui.state
         val lyrics = state.lyrics.value
-        val labels = lyrics.outcomes.map { " ${it.status.mark()} ${it.provider.displayName} " }
+        val labels = lyrics.outcomes.map {
+            if (p.skinned) "  ${it.provider.displayName} ${it.status.mark()} " else " ${it.status.mark()} ${it.provider.displayName} "
+        }
         // Laid from the left in order; one too long for what is left is passed over for a shorter one after it.
         val fitting = mutableListOf<Int>()
         var used = 0
@@ -330,7 +338,12 @@ object NowPlaying {
             val outcome = lyrics.outcomes[i]
             val chosen = outcome.provider == lyrics.selectedProvider
             val width = Canvas.displayWidth(labels[i])
-            canvas.write(cx, y, labels[i], if (chosen) p.onAccent else p.subtext, if (chosen) p.accent else p.card, if (chosen) BOLD else 0)
+            if (p.skinned) {
+                canvas.write(cx, y, labels[i], Skin.text(p), null, if (chosen) BOLD else 0)
+                Skin.radio(canvas, p, cx, y, chosen)
+            } else {
+                canvas.write(cx, y, labels[i], if (chosen) p.onAccent else p.subtext, if (chosen) p.accent else p.card, if (chosen) BOLD else 0)
+            }
             val target = outcome.provider
             tui.clickTargets += Tui.ClickTarget(cx, y, width, 1) { state.selectLyricsProvider(target) }
             cx += width + 1

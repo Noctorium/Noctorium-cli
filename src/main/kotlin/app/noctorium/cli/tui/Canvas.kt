@@ -91,6 +91,13 @@ class Canvas(val width: Int, val height: Int) {
         }
     }
 
+    /** Writes whatever is already in the cells in [foreground] instead, leaving the characters and backgrounds alone. */
+    fun recolour(x: Int, y: Int, w: Int, h: Int, foreground: Rgb) {
+        for (row in y until y + h) for (column in x until x + w) {
+            if (visible(column, row)) fg[row * width + column] = foreground
+        }
+    }
+
     /**
      * Writes [value] from [x], at most [max] columns of it, ending in an ellipsis when it had to be cut.
      * Returns how many columns were used.

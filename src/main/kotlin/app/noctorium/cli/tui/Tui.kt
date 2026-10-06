@@ -8,6 +8,7 @@ import app.noctorium.core.AppState
 import app.noctorium.domain.Track
 import app.noctorium.playback.PlaybackStatus
 import app.noctorium.playback.RepeatMode
+import app.noctorium.settings.ThemeSkin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -91,6 +92,9 @@ class Tui(
 
     /** What a mouse press on the screen means, filled in as the frame is drawn. */
     internal val clickTargets = mutableListOf<ClickTarget>()
+
+    /** Where the overlay's own [clickTargets] begin -- a close button, a push button -- which it has first. */
+    private var overlayTargets = 0
 
     data class ClickTarget(val x: Int, val y: Int, val w: Int, val h: Int, val action: (Int) -> Unit)
 
@@ -247,6 +251,7 @@ class Tui(
             Pages.draw(this, canvas, bodyX, bodyY, bodyW, bodyH)
         }
         PlayerBar.draw(this, canvas, 0, h - barHeight, w, barHeight, cover)
+        overlayTargets = clickTargets.size
         overlays.lastOrNull()?.let { overlay -> canvas.clipped(0, 0, w, h) { overlay.draw(this, canvas, w, h) } }
         drawToasts(canvas, w, h - barHeight)
         return canvas
@@ -254,6 +259,7 @@ class Tui(
 
     private fun header(canvas: Canvas, w: Int) {
         val p = palette
+        if (p.skinned) return titleBar(canvas, w)
         val bar = p.panel.takeIf { it != DEFAULT } ?: DEFAULT
         canvas.fill(0, 0, w, 1, bar)
         canvas.write(1, 0, "◉", p.accent, bar, BOLD)
@@ -272,26 +278,64 @@ class Tui(
                 x += used
             }
         }
+        var right = w - 1
+        web?.address?.let {
+            right -= canvas.writeRight(right, 0, " web ● ", p.good, bar) + 1
+        }
+        services().reversed().forEach { (name, on) ->
+            val text = "$name ${if (on) "●" else "○"}"
+            right -= canvas.writeRight(right, 0, text, if (on) p.good else p.faint, bar) + 2
+        }
+    }
+
+    /** The services signed in, by their two letters, for the header: the ones always there, and the ones once set up. */
+    private fun services(): List<Pair<String, Boolean>> {
         val settings = state.settings.value
-        val services = buildList {
+        return buildList {
             add("YT" to (settings.youtubeAccount.status == app.noctorium.settings.AccountConnectionStatus.CONNECTED))
             add("SC" to (settings.soundCloudAccount.status == app.noctorium.settings.AccountConnectionStatus.CONNECTED))
             if (settings.spotify.connected) add("SP" to true)
             if (settings.preferences.bandcampUsername.isNotBlank()) add("BC" to true)
             if (settings.vk.connected) add("VK" to true)
         }
-        var right = w - 1
-        web?.address?.let {
-            right -= canvas.writeRight(right, 0, " web ● ", p.good, bar) + 1
+    }
+
+    /**
+     * The header as the Windows themes draw it: the player's own title bar. The mark and the name, with what is
+     * playing after them as a window shows its document; the pages along it where there is no sidebar for them,
+     * the one showing pressed in; the services; and a close button, which asks before it stops the music.
+     */
+    private fun titleBar(canvas: Canvas, w: Int) {
+        val p = palette
+        val wide = w >= 96
+        val playing = state.playback.value.track?.title?.takeIf { wide }
+        val end = Skin.titleBar(this, canvas, 0, 0, w, "◉ Noctorium" + playing?.let { " - $it" }.orEmpty()) {
+            overlays.addLast(Overlay.Confirm("Close Noctorium?", "The music stops with it.") { running = false })
         }
-        services.reversed().forEach { (name, on) ->
-            val text = "$name ${if (on) "●" else "○"}"
-            right -= canvas.writeRight(right, 0, text, if (on) p.good else p.faint, bar) + 2
+        var x = 14
+        if (!wide) {
+            Page.entries.forEachIndexed { i, entry ->
+                val label = " ${i + 1}${entry.icon} "
+                val used = Canvas.displayWidth(label)
+                if (x + used >= end - 18) return@forEachIndexed
+                val active = entry == page
+                if (active) canvas.write(x, 0, label, Skin.text(p), Skin.face(p), BOLD)
+                else canvas.write(x, 0, label, Skin.titleText(p), null)
+                val target = entry
+                clickTargets += ClickTarget(x, 0, used, 1) { go(target) }
+                x += used
+            }
+        }
+        var right = end
+        web?.address?.let { right -= canvas.writeRight(right, 0, "web ●", Skin.titleText(p), null) + 2 }
+        services().reversed().forEach { (name, on) ->
+            right -= canvas.writeRight(right, 0, "$name ${if (on) "●" else "○"}", if (on) Skin.titleText(p) else Skin.titleQuiet(p), null, if (on) BOLD else 0) + 2
         }
     }
 
     private fun sidebar(canvas: Canvas, x: Int, y: Int, w: Int, h: Int) {
         val p = palette
+        if (p.skinned) return if (p.skin == ThemeSkin.WINDOWS_XP) taskPane(canvas, x, y, w, h) else folders(canvas, x, y, w, h)
         val bg = p.panel
         canvas.fill(x, y, w, h, bg)
         for (r in y until y + h) canvas.set(x + w - 1, r, "│", p.line, bg)
@@ -330,6 +374,93 @@ class Tui(
         canvas.write(x + 2, y + h - 1, "${key(KeyAction.HELP)} keys   v$cliVersion", p.faint, bg, max = w - 3)
     }
 
+    /**
+     * The sidebar as 98 draws it: the pages and the playlists in a white list sunk into the grey, as Explorer's
+     * folders sat down the left of its window, the one showing in navy.
+     */
+    private fun folders(canvas: Canvas, x: Int, y: Int, w: Int, h: Int) {
+        val p = palette
+        canvas.fill(x, y, w, h, Skin.face(p))
+        val listW = w - 3
+        Skin.well(canvas, p, x + 1, y + 1, listW, h - 2, foot = true)
+        var row = y + 1
+        Page.entries.forEachIndexed { i, entry ->
+            if (row >= y + h - 2) return@forEachIndexed
+            val active = entry == page
+            if (active) canvas.fill(x + 1, row, listW, 1, Skin.selection(p))
+            canvas.write(x + 2, row, entry.icon, if (active) Skin.selectionText(p) else p.accent, null, BOLD)
+            canvas.write(x + 4, row, entry.title, if (active) Skin.selectionText(p) else Skin.text(p), null, if (active) BOLD else 0)
+            canvas.writeRight(x + w - 3, row, "${i + 1}", if (active) Skin.selectionText(p) else Skin.greyText(p), null)
+            val target = entry
+            clickTargets += ClickTarget(x, row, w - 1, 1) { go(target) }
+            row++
+        }
+        playlists(canvas, x, row + 1, w, y + h - 3, Skin.text(p), Skin.greyText(p))
+        canvas.write(x + 2, y + h - 2, "${key(KeyAction.HELP)} keys   v$cliVersion", Skin.greyText(p), null, max = listW - 1)
+    }
+
+    /**
+     * The sidebar as XP draws it: Explorer's task pane, a blue running down it with the pages and the playlists in
+     * pale panels under their own headings, the page showing picked out.
+     */
+    private fun taskPane(canvas: Canvas, x: Int, y: Int, w: Int, h: Int) {
+        for (r in 0 until h) canvas.fill(x, y + r, w, 1, mix(Xp.TASK_PANE_TOP, Xp.TASK_PANE_FOOT, r / (h - 1f).coerceAtLeast(1f)))
+        val panelW = w - 2
+        val link = Xp.TASK_PANEL_TITLE
+        fun heading(row: Int, title: String) {
+            Skin.gradient(canvas, x + 1, row, panelW, Xp.WINDOW, mix(Xp.TASK_PANEL, Xp.TASK_PANE_TOP, .35f))
+            canvas.write(x + 2, row, title, link, null, BOLD)
+        }
+        heading(y + 1, "Pages")
+        var row = y + 2
+        Page.entries.forEachIndexed { i, entry ->
+            if (row >= y + h - 2) return@forEachIndexed
+            val active = entry == page
+            canvas.fill(x + 1, row, panelW, 1, if (active) Xp.SELECTION else Xp.TASK_PANEL)
+            val colour = if (active) Xp.SELECTION_TEXT else link
+            canvas.write(x + 2, row, entry.icon, colour, null, BOLD)
+            canvas.write(x + 4, row, entry.title, colour, null, if (active) BOLD else 0)
+            canvas.writeRight(x + w - 3, row, "${i + 1}", if (active) colour else mix(link, Xp.TASK_PANEL, .45f), null)
+            val target = entry
+            clickTargets += ClickTarget(x, row, w - 1, 1) { go(target) }
+            row++
+        }
+        val library = state.library.value
+        if (library.playlists.isNotEmpty() && row + 3 < y + h - 1) {
+            heading(row + 1, "Playlists")
+            val rows = (y + h - 2 - (row + 2)).coerceAtLeast(0)
+            canvas.fill(x + 1, row + 2, panelW, minOf(rows, library.playlists.size), Xp.TASK_PANEL)
+            playlists(canvas, x, row + 2, w, y + h - 2, link, mix(link, Xp.TASK_PANEL, .45f), heading = false)
+        }
+        canvas.write(x + 2, y + h - 1, "${key(KeyAction.HELP)} keys   v$cliVersion", Xp.TITLE_TEXT, null, max = w - 3)
+    }
+
+    /**
+     * The playlists under the pages in a skin's sidebar, from [top] to before [bottom], under a heading of their
+     * own unless the skin drew one; clicking one opens it.
+     */
+    private fun playlists(canvas: Canvas, x: Int, top: Int, w: Int, bottom: Int, text: Rgb, quiet: Rgb, heading: Boolean = true) {
+        val library = state.library.value
+        if (library.playlists.isEmpty()) return
+        var row = top
+        if (heading) {
+            if (row + 1 >= bottom) return
+            canvas.write(x + 2, row++, "Playlists", quiet, null, BOLD)
+        }
+        library.playlists.forEach { pl ->
+            if (row >= bottom) return
+            canvas.write(x + 2, row, "·", palette.badgeColour(pl.provider), null, BOLD)
+            canvas.write(x + 4, row, pl.title, text, null, max = w - 7)
+            val target = pl
+            clickTargets += ClickTarget(x, row, w - 1, 1) {
+                page = Page.LIBRARY
+                libraryOpen = true
+                state.openPlaylist(target)
+            }
+            row++
+        }
+    }
+
     private fun drawToasts(canvas: Canvas, w: Int, bottom: Int) {
         val now = System.currentTimeMillis()
         val showing = synchronized(toasts) {
@@ -344,9 +475,17 @@ class Tui(
             val tw = minOf(Canvas.displayWidth(text) + 2, w - 4)
             val x = w - tw - 2
             val colour = toneColour(p, toast.tone).takeIf { toast.tone != Row.Tone.NORMAL } ?: p.text
-            canvas.fill(x, y, tw, 1, p.card)
-            canvas.set(x, y, "▌", if (toast.tone == Row.Tone.NORMAL) p.accent else colour, p.card)
-            canvas.write(x + 1, y, text, colour, p.card, max = tw - 1)
+            if (p.skinned) {
+                // A tooltip, as both Windows drew them: pale yellow, edged in black.
+                canvas.fill(x, y, tw, 1, W98.TOOLTIP)
+                canvas.set(x, y, Skin.LEFT, W98.TEXT, W98.TOOLTIP)
+                canvas.set(x + tw - 1, y, Skin.RIGHT, W98.TEXT, W98.TOOLTIP)
+                canvas.write(x + 1, y, text, colour, W98.TOOLTIP, max = tw - 2)
+            } else {
+                canvas.fill(x, y, tw, 1, p.card)
+                canvas.set(x, y, "▌", if (toast.tone == Row.Tone.NORMAL) p.accent else colour, p.card)
+                canvas.write(x + 1, y, text, colour, p.card, max = tw - 1)
+            }
             y--
             if (y < 2) break
         }
@@ -535,7 +674,13 @@ class Tui(
     }
 
     private fun mouse(input: Input.Mouse) {
-        overlays.lastOrNull()?.let { if (it.mouse(this, input)) return }
+        overlays.lastOrNull()?.let { overlay ->
+            if (input.kind == MouseKind.PRESS) {
+                clickTargets.drop(overlayTargets).lastOrNull { input.x >= it.x && input.x < it.x + it.w && input.y >= it.y && input.y < it.y + it.h }
+                    ?.let { target -> target.action(input.x - target.x); return }
+            }
+            if (overlay.mouse(this, input)) return
+        }
         when (input.kind) {
             MouseKind.WHEEL_UP -> Pages.scroll(this, -3)
             MouseKind.WHEEL_DOWN -> Pages.scroll(this, 3)

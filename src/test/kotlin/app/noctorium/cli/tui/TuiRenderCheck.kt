@@ -142,6 +142,45 @@ class TuiRenderCheck {
                     write(folder, "$name-narrow", tui, 84, 30)
                 }
             }
+            tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
+
+            // The two Windows themes, drawn as themselves: the pages, a list, Settings, Now playing, the dialogs,
+            // a tooltip and the taskbar, wide and narrow.
+            for ((theme, style) in listOf(ThemePreset.WINDOWS_98 to ProgressBarStyle.CLASSIC, ThemePreset.WINDOWS_XP to ProgressBarStyle.MATERIAL)) {
+                state.setTheme(theme)
+                state.setProgressBarStyle(style)
+                val name = theme.name.lowercase().removePrefix("windows_")
+                for (page in listOf(Page.HOME, Page.SEARCH, Page.QUEUE, Page.NOW_PLAYING)) {
+                    tui.page = page
+                    write(folder, "$name-${page.name.lowercase().replace('_', '-')}", tui)
+                }
+                tui.preferences.nowPlaying = TuiNowPlaying.LYRICS
+                write(folder, "$name-now-lyrics", tui)
+                tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
+                tui.page = Page.SETTINGS
+                tui.list(Page.SETTINGS.name).selected = Settings.rows(tui).indexOfFirst { it is Row.Action && it.label == "Seek bar" }
+                write(folder, "$name-settings", tui)
+                tui.page = Page.QUEUE
+                tui.overlays.addLast(Overlay.Confirm("Clear the queue?", "Playback stops too.") {})
+                write(folder, "$name-confirm", tui)
+                tui.overlays.clear()
+                tui.overlays.addLast(Overlays.sleepTimer(tui))
+                write(folder, "$name-picker", tui)
+                tui.overlays.clear()
+                tui.overlays.addLast(Overlay.Prompt("Save the queue", "A name for the playlist. It is kept in Noctorium on this computer.", "Night drive") {})
+                write(folder, "$name-prompt", tui)
+                tui.overlays.clear()
+                tui.overlays.addLast(Overlay.Help)
+                write(folder, "$name-help", tui)
+                tui.overlays.clear()
+                tui.toast("Theme: Windows ${theme.displayName}")
+                tui.preferences.playerBar = TuiPlayerBar.TASKBAR
+                write(folder, "$name-taskbar", tui)
+                write(folder, "$name-taskbar-narrow", tui, 84, 24)
+                tui.preferences.playerBar = TuiPlayerBar.FULL
+                tui.page = Page.HOME
+                write(folder, "$name-home-narrow", tui, 90, 30)
+            }
         } finally {
             tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
             tui.preferences.playerBar = TuiPlayerBar.FULL

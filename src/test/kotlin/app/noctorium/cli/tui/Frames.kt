@@ -60,6 +60,7 @@ object Frames {
                 g.font = font
                 g.drawString(t, x * CELL_W, y * CELL_H + 14)
             }
+            if (canvas.style[i] and UNDERLINE != 0) g.fillRect(x * CELL_W, y * CELL_H + 15, w, 1)
         }
         g.dispose()
         return image

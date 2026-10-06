@@ -2,6 +2,7 @@ package app.noctorium.cli.tui
 
 import app.noctorium.playback.PlaybackStatus
 import app.noctorium.playback.RepeatMode
+import app.noctorium.settings.ThemeSkin
 import app.noctorium.settings.TimeDisplay
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -36,9 +37,9 @@ object PlayerBar {
         val playback = state.playback.value
         val queue = state.queue.state.value
         val preferences = state.settings.value.preferences
-        val bg = p.panel.takeIf { it != DEFAULT } ?: DEFAULT
+        val bg = barBackground(p)
         canvas.fill(x, y, w, h, bg)
-        for (c in x until x + w) canvas.set(c, y, "─", p.line, bg)
+        edge(canvas, p, x, y, w, bg)
         val track = playback.track
         val inner = y + 1
         val rows = h - 1
@@ -98,7 +99,7 @@ object PlayerBar {
         // The controls, centred over the seek bar.
         val middleLeft = left + infoWidth + 2
         val middleWidth = (x + w - rightWidth - 1 - middleLeft).coerceAtLeast(TRANSPORT_WIDTH)
-        transport(tui, canvas, middleLeft + (middleWidth - TRANSPORT_WIDTH) / 2, inner, bg)
+        transport(tui, canvas, middleLeft + (middleWidth - TRANSPORT_WIDTH) / 2, inner, bg, roomBelow = rows >= 3)
 
         if (rows >= 2) {
             seek(tui, canvas, middleLeft, if (rows >= 3) inner + 2 else inner + 1, middleWidth, bg, roomAbove = rows >= 3)
@@ -146,14 +147,12 @@ object PlayerBar {
      */
     private fun compact(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int) {
         val p = tui.palette
-        val state = tui.state
-        val bg = p.panel.takeIf { it != DEFAULT } ?: DEFAULT
+        val bg = barBackground(p)
         canvas.fill(x, y, w, 2, bg)
-        for (c in x until x + w) canvas.set(c, y, "─", p.line, bg)
+        edge(canvas, p, x, y, w, bg)
         val row = y + 1
-        canvas.write(x + 1, row, " ${playSymbol(tui)} ", p.onAccent, p.accent, BOLD)
-        tui.clickTargets += Tui.ClickTarget(x + 1, row, 4, 1) { state.togglePlayback() }
-        val trackX = x + 7
+        playButton(tui, canvas, x + 1, row, p)
+        val trackX = x + 8
         val trackW = (w * 34 / 100).coerceIn(12, 56)
         trackLine(tui, canvas, trackX, row, trackW, bg)
         seek(tui, canvas, trackX + trackW + 2, row, x + w - 1 - (trackX + trackW + 2), bg, roomAbove = false)
@@ -164,59 +163,155 @@ object PlayerBar {
      * controls where the small launch buttons sat; the song as the button of the window in use -- pressed in
      * while it plays, and pressed again to pause it, as a window's button put it away; the seek bar; and the
      * tray at the far end, with the volume and the clock, which opens the sleep timer. Plain in most themes;
-     * the Windows ones dress it as their own.
+     * 98 draws it as its grey bar of raised buttons and XP as Luna's blue one with its green start button.
      */
     private fun taskbar(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int) {
-        val p = tui.palette
+        val theme = tui.palette
         val state = tui.state
         val playback = state.playback.value
-        val bg = p.panel.takeIf { it != DEFAULT } ?: DEFAULT
-        canvas.fill(x, y, w, 2, bg)
-        for (c in x until x + w) canvas.set(c, y, "─", p.line, bg)
+        val xp = theme.skin == ThemeSkin.WINDOWS_XP
+        // What is written on the bar: on XP's blue, white; elsewhere, the theme's own colours.
+        val p = if (xp) onLuna(theme) else theme
+        val bg = if (xp) Xp.TASKBAR else barBackground(theme)
         val row = y + 1
+        canvas.fill(x, y, w, 2, bg)
+        if (xp) {
+            // Luna's taskbar is lighter at its top, under a bright rim.
+            canvas.fill(x, y, w, 1, Xp.TASKBAR_TOP)
+            for (c in x until x + w) canvas.set(c, y, Skin.TOP, mix(Xp.TASKBAR_TOP, 0xFFFFFF, .45f), Xp.TASKBAR_TOP)
+        } else {
+            edge(canvas, theme, x, y, w, bg)
+        }
 
         // The start button: the mark and the name, or the mark alone when the bar is short of room.
-        val start = if (w >= 90) " ◉ Noctorium " else " ◉ "
-        val startW = Canvas.displayWidth(start)
-        canvas.write(x, row, start, p.onAccent, p.accent, BOLD)
+        val startW = startButton(tui, canvas, x, y, if (w >= 90) "◉ Noctorium" else "◉")
         tui.clickTargets += Tui.ClickTarget(x, row, startW, 1) { tui.go(Page.NOW_PLAYING) }
         var left = x + startW + 2
 
         // The controls: all five where there is room, then previous, play and next, then play alone.
         left += when {
-            w >= 120 -> { transport(tui, canvas, left, row, bg); TRANSPORT_WIDTH }
-            w >= 90 -> { transport(tui, canvas, left - 4, row, bg, ends = false); TRANSPORT_WIDTH - 8 }
-            else -> {
-                canvas.write(left, row, " ${playSymbol(tui)} ", p.onAccent, p.accent, BOLD)
-                tui.clickTargets += Tui.ClickTarget(left, row, 4, 1) { state.togglePlayback() }
-                4
-            }
+            w >= 120 -> { transport(tui, canvas, left, row, bg, ink = p, onLuna = xp); TRANSPORT_WIDTH }
+            w >= 90 -> { transport(tui, canvas, left - 4, row, bg, ends = false, ink = p, onLuna = xp); TRANSPORT_WIDTH - 8 }
+            else -> playButton(tui, canvas, left, row, p, onLuna = xp)
         } + 2
 
         // The tray, from the right: the volume, then the clock, with a cell either end and two for the moon.
         val clock = clock()
         val trayW = VOLUME_BARS + Canvas.displayWidth(clock) + 5
         val trayX = x + w - trayW
-        val trayBg = p.card
+        val trayBg = when {
+            xp -> Xp.TRAY
+            theme.skinned -> W98.FACE
+            else -> theme.card
+        }
         canvas.fill(trayX, row, trayW, 1, trayBg)
-        volume(tui, canvas, trayX + 1, row, trayBg, p.accent, p.faint)
-        tray(tui, canvas, trayX + VOLUME_BARS + 4, row, clock, p.subtext, trayBg)
+        when {
+            xp -> {
+                // XP's tray is a lighter blue the height of the bar, edged in a darker one on its left.
+                canvas.fill(trayX, y, trayW, 1, Xp.TRAY)
+                for (c in trayX until trayX + trayW) canvas.set(c, y, Skin.TOP, mix(Xp.TRAY, 0xFFFFFF, .45f), Xp.TRAY)
+                canvas.set(trayX, y, Skin.LEFT, Xp.TRAY_EDGE, Xp.TRAY)
+                canvas.set(trayX, row, Skin.LEFT, Xp.TRAY_EDGE, Xp.TRAY)
+            }
+            theme.skinned -> {
+                // 98's tray is sunk into the bar.
+                canvas.set(trayX, row, Skin.LEFT, W98.SHADOW, W98.FACE)
+                canvas.set(trayX + trayW - 1, row, Skin.RIGHT, W98.HIGHLIGHT, W98.FACE)
+            }
+        }
+        volume(tui, canvas, trayX + 1, row, trayBg, p.accent, if (theme.skinned) p.line else p.faint)
+        tray(tui, canvas, trayX + VOLUME_BARS + 4, row, clock, p, trayBg)
 
         // The song's button, then the seek bar across what is left between it and the tray.
         val buttonW = (w * 24 / 100).coerceIn(10, 42)
         val pressed = playback.status == PlaybackStatus.PLAYING
-        canvas.fill(left, row, buttonW, 1, if (pressed) p.selection else bg)
-        trackLine(tui, canvas, left + 1, row, buttonW - 2, if (pressed) p.selection else bg)
+        val face = taskButton(canvas, theme, left, row, buttonW, pressed, bg)
+        trackLine(tui, canvas, left + 1, row, buttonW - 2, face, ink = p)
         tui.clickTargets += Tui.ClickTarget(left, row, buttonW, 1) { state.togglePlayback() }
         val seekX = left + buttonW + 1
-        seek(tui, canvas, seekX, row, trayX - 1 - seekX, bg, roomAbove = false)
+        seek(tui, canvas, seekX, row, trayX - 1 - seekX, bg, roomAbove = false, ink = p)
+    }
+
+    /**
+     * The start button, its [label] from [x] on the taskbar's row under [y]: the theme's accent; 98's raised slab;
+     * or XP's green, the bar's height, lighter at its top and rounded at its end. Returns how wide it is.
+     */
+    private fun startButton(tui: Tui, canvas: Canvas, x: Int, y: Int, label: String): Int {
+        val p = tui.palette
+        val row = y + 1
+        return when (p.skin) {
+            ThemeSkin.WINDOWS_98 -> Skin.button(canvas, p, x, row, label, default = true, roomAbove = false, roomBelow = false)
+            ThemeSkin.WINDOWS_XP -> {
+                val w = Canvas.displayWidth(label) + 3
+                canvas.fill(x, y, w, 1, Xp.START_LIGHT)
+                canvas.fill(x, row, w, 1, Xp.START)
+                canvas.write(x + 1, row, label, Xp.TITLE_TEXT, Xp.START, BOLD or ITALIC)
+                canvas.set(x + w, y, "▖", Xp.START_LIGHT)
+                canvas.set(x + w, row, "▘", Xp.START)
+                w + 1
+            }
+            else -> canvas.write(x, row, " $label ", p.onAccent, p.accent, BOLD)
+        }
+    }
+
+    /**
+     * The song's button on the taskbar, [w] across from [x]: pressed in while it plays and standing out while it
+     * does not, in the theme's own way. Returns the colour its face is, for the writing on it.
+     */
+    private fun taskButton(canvas: Canvas, p: Palette, x: Int, y: Int, w: Int, pressed: Boolean, bg: Rgb): Rgb = when (p.skin) {
+        ThemeSkin.WINDOWS_98 -> {
+            // Pressed, 98 filled it with a dither of white and grey, and lit it from the other side.
+            val face = if (pressed) W98.LIGHT else W98.FACE
+            canvas.fill(x, y, w, 1, face)
+            canvas.set(x, y, Skin.LEFT, if (pressed) W98.DARK_SHADOW else W98.HIGHLIGHT, face)
+            canvas.set(x + w - 1, y, Skin.RIGHT, if (pressed) W98.HIGHLIGHT else W98.DARK_SHADOW, face)
+            face
+        }
+        ThemeSkin.WINDOWS_XP -> {
+            val face = if (pressed) mix(Xp.TASKBAR, Xp.TASKBAR_FOOT, .75f) else mix(Xp.TASKBAR, Xp.WINDOW, .2f)
+            canvas.fill(x, y, w, 1, face)
+            face
+        }
+        else -> (if (pressed) p.selection else bg).also { canvas.fill(x, y, w, 1, it) }
+    }
+
+    /** The colours of what is written on XP's blue taskbar: white, with the theme's own skin. */
+    private fun onLuna(p: Palette): Palette = p.copy(
+        page = Xp.TASKBAR,
+        panel = Xp.TASKBAR,
+        text = Xp.TITLE_TEXT,
+        subtext = mix(Xp.TITLE_TEXT, Xp.TASKBAR, .15f),
+        accent = Xp.TITLE_TEXT,
+    )
+
+    /** What the bar is filled with: the panel's colour, or a Windows theme's face. */
+    private fun barBackground(p: Palette): Rgb = if (p.skinned) Skin.face(p) else p.panel.takeIf { it != DEFAULT } ?: DEFAULT
+
+    /** The bar's top edge: a line, or a Windows theme's lit edge along the top of a raised bar. */
+    private fun edge(canvas: Canvas, p: Palette, x: Int, y: Int, w: Int, bg: Rgb) {
+        if (p.skinned) for (c in x until x + w) canvas.set(c, y, Skin.TOP, if (p.skin == ThemeSkin.WINDOWS_XP) Xp.WINDOW else W98.HIGHLIGHT, bg)
+        else for (c in x until x + w) canvas.set(c, y, "─", p.line, bg)
+    }
+
+    /**
+     * The play button alone, at [x]: the accent's chip, a Windows theme's push button, or on XP's blue taskbar a
+     * chip in its green. Returns how wide it is.
+     */
+    private fun playButton(tui: Tui, canvas: Canvas, x: Int, y: Int, p: Palette, onLuna: Boolean = false): Int {
+        val w = when {
+            onLuna -> canvas.write(x, y, " ${playSymbol(tui)} ", Xp.TITLE_TEXT, Xp.START, BOLD)
+            p.skinned -> Skin.button(canvas, p, x, y, playSymbol(tui), default = true, roomAbove = false, roomBelow = false)
+            else -> canvas.write(x, y, " ${playSymbol(tui)} ", p.onAccent, p.accent, BOLD)
+        }
+        tui.clickTargets += Tui.ClickTarget(x, y, w, 1) { tui.state.togglePlayback() }
+        return w
     }
 
     /** The clock in the tray, with the sleep timer's moon in front of it while one is set; clicking it sets one. */
-    private fun tray(tui: Tui, canvas: Canvas, x: Int, y: Int, clock: String, colour: Rgb, bg: Rgb) {
+    private fun tray(tui: Tui, canvas: Canvas, x: Int, y: Int, clock: String, p: Palette, bg: Rgb) {
         val sleeping = tui.state.sleepTimer.value != null
-        if (sleeping) canvas.set(x - 2, y, "☾", tui.palette.accent, bg, BOLD)
-        canvas.write(x, y, clock, colour, bg)
+        if (sleeping) canvas.set(x - 2, y, "☾", p.accent, bg, BOLD)
+        canvas.write(x, y, clock, if (p.skinned) p.text else p.subtext, bg)
         tui.clickTargets += Tui.ClickTarget(x - 2, y, Canvas.displayWidth(clock) + 2, 1) { tui.overlays.addLast(Overlays.sleepTimer(tui)) }
     }
 
@@ -226,8 +321,8 @@ object PlayerBar {
     private val CLOCK = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
 
     /** The title in bold and the artist after it, or what is going on instead, in [w] cells from [x]. */
-    private fun trackLine(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int, bg: Rgb) {
-        val p = tui.palette
+    private fun trackLine(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int, bg: Rgb, ink: Palette = tui.palette) {
+        val p = ink
         val playback = tui.state.playback.value
         val track = playback.track
         val waiting = tui.state.queue.state.value.current
@@ -260,10 +355,22 @@ object PlayerBar {
 
     /**
      * Shuffle, previous, play, next and repeat, from [x]; without shuffle and repeat at the [ends] when there
-     * is not the room, in which case [x] is still where shuffle would have been.
+     * is not the room, in which case [x] is still where shuffle would have been. In the Windows themes play is
+     * one of their push buttons, its foot drawn in the row under it where [roomBelow] says it is free -- or, on
+     * XP's taskbar, a chip in the start button's green, as that bar had no grey buttons.
      */
-    internal fun transport(tui: Tui, canvas: Canvas, x: Int, y: Int, bg: Rgb, ends: Boolean = true) {
-        val p = tui.palette
+    internal fun transport(
+        tui: Tui,
+        canvas: Canvas,
+        x: Int,
+        y: Int,
+        bg: Rgb,
+        ends: Boolean = true,
+        roomBelow: Boolean = false,
+        ink: Palette = tui.palette,
+        onLuna: Boolean = false,
+    ) {
+        val p = ink
         val state = tui.state
         val queue = state.queue.state.value
         val play = playSymbol(tui)
@@ -273,11 +380,17 @@ object PlayerBar {
         }
         // Drawn from plain shapes rather than the media symbols, which some terminals turn into wide emoji.
         canvas.write(x + 4, y, "|◀", p.text, bg)
-        canvas.write(x + 8, y, " $play ", p.onAccent, p.accent, BOLD)
+        when {
+            onLuna -> canvas.write(x + 8, y, " $play ", Xp.TITLE_TEXT, Xp.START, BOLD)
+            // A push button is two cells wider than the chip: one taken from each side of it.
+            p.skinned -> Skin.button(canvas, p, x + 7, y, play, default = true, roomAbove = false, roomBelow = roomBelow)
+            else -> canvas.write(x + 8, y, " $play ", p.onAccent, p.accent, BOLD)
+        }
         // Dim where next would go nowhere: the queue's end, with nothing repeating and nothing from autoplay.
         canvas.write(x + 14, y, "▶|", if (queue.hasNext) p.text else p.faint, bg)
         tui.clickTargets += Tui.ClickTarget(x + 4, y, 3, 1) { state.previous() }
-        tui.clickTargets += Tui.ClickTarget(x + 8, y, 5, 1) { state.togglePlayback() }
+        val button = p.skinned && !onLuna
+        tui.clickTargets += Tui.ClickTarget(if (button) x + 7 else x + 8, y, if (button) 6 else 5, 1) { state.togglePlayback() }
         tui.clickTargets += Tui.ClickTarget(x + 14, y, 3, 1) { state.next() }
         if (ends) {
             canvas.write(x + 19, y, if (queue.repeatMode == RepeatMode.ONE) "↻1" else "↻", if (queue.repeatMode != RepeatMode.OFF) p.accent else p.faint, bg, BOLD)
@@ -289,8 +402,18 @@ object PlayerBar {
      * The seek bar with the time played before it and the length, or the time left, after it, in [w] cells from
      * [x]; clicking the bar seeks there.
      */
-    internal fun seek(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int, bg: Rgb, roomAbove: Boolean, roomBelow: Boolean = false) {
-        val p = tui.palette
+    internal fun seek(
+        tui: Tui,
+        canvas: Canvas,
+        x: Int,
+        y: Int,
+        w: Int,
+        bg: Rgb,
+        roomAbove: Boolean,
+        roomBelow: Boolean = false,
+        ink: Palette = tui.palette,
+    ) {
+        val p = ink
         val state = tui.state
         val playback = state.playback.value
         val track = playback.track
