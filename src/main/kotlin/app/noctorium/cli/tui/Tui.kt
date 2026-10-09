@@ -648,7 +648,7 @@ class Tui(
         val current = themes.indexOf(state.settings.value.preferences.theme).coerceAtLeast(0)
         val next = themes[(current + direction + themes.size) % themes.size]
         state.setTheme(next)
-        toast("Theme: ${next.family} ${next.displayName}".replace("Noctorium Noctorium", "Noctorium"))
+        toast("Theme: ${Settings.themeName(next)}")
     }
 
     internal fun toggleWeb() {

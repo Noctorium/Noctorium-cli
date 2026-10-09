@@ -45,8 +45,8 @@ object SeekBars {
         val head = (fraction * (w - 1)).toInt().coerceIn(0, w - 1)
         val unplayed = p.line
         when {
-            p.skin == ThemeSkin.WINDOWS_98 && style == ProgressBarStyle.MATERIAL -> trackbar98(canvas, x, y, w, head, bg, roomAbove, roomBelow)
-            p.skin == ThemeSkin.WINDOWS_98 && style == ProgressBarStyle.CLASSIC -> progress98(canvas, x, y, w, head, bg, roomAbove, roomBelow)
+            p.skin == ThemeSkin.WINDOWS_98 && style == ProgressBarStyle.MATERIAL -> trackbar98(canvas, p.w98, x, y, w, head, bg, roomAbove, roomBelow)
+            p.skin == ThemeSkin.WINDOWS_98 && style == ProgressBarStyle.CLASSIC -> progress98(canvas, p.w98, x, y, w, head, bg, roomAbove, roomBelow)
             p.skin == ThemeSkin.WINDOWS_XP && style == ProgressBarStyle.MATERIAL -> trackbarXp(canvas, x, y, w, head, bg, roomAbove)
             else -> when (style) {
                 ProgressBarStyle.MINIMAL, ProgressBarStyle.MATERIAL -> {
@@ -187,31 +187,31 @@ object SeekBars {
      * Windows 98's trackbar: a groove, and a grey slab for a handle, lit along its left and shaded down its right,
      * standing above and below the groove where it can. The groove does not fill: the slab says where the song is.
      */
-    private fun trackbar98(canvas: Canvas, x: Int, y: Int, w: Int, head: Int, bg: Rgb, roomAbove: Boolean, roomBelow: Boolean) {
-        for (i in 0 until w) canvas.set(x + i, y, "═", W98.SHADOW, bg)
-        slab(canvas, x + head.coerceAtMost(w - 2).coerceAtLeast(0), y, minOf(2, w), roomAbove, roomBelow)
+    private fun trackbar98(canvas: Canvas, c: W98, x: Int, y: Int, w: Int, head: Int, bg: Rgb, roomAbove: Boolean, roomBelow: Boolean) {
+        for (i in 0 until w) canvas.set(x + i, y, "═", c.groove, bg)
+        slab(canvas, c, x + head.coerceAtMost(w - 2).coerceAtLeast(0), y, minOf(2, w), roomAbove, roomBelow)
     }
 
     /**
      * Windows 98's progress bar: a sunken white well filling with navy blocks, a gap after each, and the
      * trackbar's slab riding on it as the handle.
      */
-    private fun progress98(canvas: Canvas, x: Int, y: Int, w: Int, head: Int, bg: Rgb, roomAbove: Boolean, roomBelow: Boolean) {
-        if (w < 4) return trackbar98(canvas, x, y, w, head, bg, roomAbove, roomBelow)
-        canvas.set(x, y, Skin.RIGHT, W98.SHADOW, bg)
-        canvas.set(x + w - 1, y, Skin.LEFT, W98.HIGHLIGHT, bg)
-        for (i in 1 until w - 1) canvas.set(x + i, y, if (i < head) "▊" else " ", W98.SELECTION, W98.WINDOW)
-        if (roomAbove) for (i in 1 until w - 1) canvas.set(x + i, y - 1, Skin.FOOT, W98.SHADOW)
-        if (roomBelow) for (i in 1 until w - 1) canvas.set(x + i, y + 1, Skin.TOP, W98.HIGHLIGHT)
-        slab(canvas, x + head.coerceIn(1, w - 3), y, 2, roomAbove = false, roomBelow = false)
+    private fun progress98(canvas: Canvas, c: W98, x: Int, y: Int, w: Int, head: Int, bg: Rgb, roomAbove: Boolean, roomBelow: Boolean) {
+        if (w < 4) return trackbar98(canvas, c, x, y, w, head, bg, roomAbove, roomBelow)
+        canvas.set(x, y, Skin.RIGHT, c.shadow, bg)
+        canvas.set(x + w - 1, y, Skin.LEFT, c.highlight, bg)
+        for (i in 1 until w - 1) canvas.set(x + i, y, if (i < head) "▊" else " ", c.selection, c.window)
+        if (roomAbove) for (i in 1 until w - 1) canvas.set(x + i, y - 1, Skin.FOOT, c.shadow)
+        if (roomBelow) for (i in 1 until w - 1) canvas.set(x + i, y + 1, Skin.TOP, c.highlight)
+        slab(canvas, c, x + head.coerceIn(1, w - 3), y, 2, roomAbove = false, roomBelow = false)
     }
 
     /** The raised grey slab 98 made every handle of: two cells, white down its left and black down its right. */
-    private fun slab(canvas: Canvas, x: Int, y: Int, w: Int, roomAbove: Boolean, roomBelow: Boolean) {
-        canvas.set(x, y, Skin.LEFT, W98.HIGHLIGHT, W98.FACE)
-        if (w > 1) canvas.set(x + w - 1, y, Skin.RIGHT, W98.DARK_SHADOW, W98.FACE)
-        if (roomAbove) for (i in 0 until w) canvas.set(x + i, y - 1, Skin.FOOT, W98.HIGHLIGHT)
-        if (roomBelow) for (i in 0 until w) canvas.set(x + i, y + 1, Skin.TOP, W98.DARK_SHADOW)
+    private fun slab(canvas: Canvas, c: W98, x: Int, y: Int, w: Int, roomAbove: Boolean, roomBelow: Boolean) {
+        canvas.set(x, y, Skin.LEFT, c.highlight, c.face)
+        if (w > 1) canvas.set(x + w - 1, y, Skin.RIGHT, c.darkShadow, c.face)
+        if (roomAbove) for (i in 0 until w) canvas.set(x + i, y - 1, Skin.FOOT, c.highlight)
+        if (roomBelow) for (i in 0 until w) canvas.set(x + i, y + 1, Skin.TOP, c.darkShadow)
     }
 
     /**

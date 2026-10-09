@@ -1,28 +1,58 @@
 package app.noctorium.cli.tui
 
 import app.noctorium.settings.ThemeSkin
-import app.noctorium.settings.Windows98Colours
+import app.noctorium.settings.Windows98Palette
 import app.noctorium.settings.WindowsXpColours
+import app.noctorium.settings.contrastRatio
 
 /** One of core's system colours, as a cell takes it. */
 private fun cell(argb: Long): Rgb = (argb and 0xFFFFFF).toInt()
 
-/** Windows 98's system colours ([Windows98Colours]), for cells. */
-internal object W98 {
-    val FACE = cell(Windows98Colours.FACE)
-    val HIGHLIGHT = cell(Windows98Colours.HIGHLIGHT)
-    val LIGHT = cell(Windows98Colours.LIGHT)
-    val SHADOW = cell(Windows98Colours.SHADOW)
-    val DARK_SHADOW = cell(Windows98Colours.DARK_SHADOW)
-    val WINDOW = cell(Windows98Colours.WINDOW)
-    val TEXT = cell(Windows98Colours.TEXT)
-    val GREY_TEXT = cell(Windows98Colours.GREY_TEXT)
-    val SELECTION = cell(Windows98Colours.SELECTION)
-    val SELECTION_TEXT = cell(Windows98Colours.SELECTION_TEXT)
-    val TITLE = cell(Windows98Colours.TITLE)
-    val TITLE_END = cell(Windows98Colours.TITLE_END)
-    val TITLE_TEXT = cell(Windows98Colours.TITLE_TEXT)
-    val TOOLTIP = cell(Windows98Colours.TOOLTIP)
+/**
+ * A scheme of Windows 98's system colours ([Windows98Palette]), for cells: 98's own grey, or Noctorium 98's night.
+ * The skin draws every bevel, title bar and list from the one in force, [Palette.w98], as 98 drew them from the
+ * scheme chosen in its Display Properties.
+ */
+internal class W98 private constructor(palette: Windows98Palette) {
+    val face = cell(palette.face)
+    val highlight = cell(palette.highlight)
+    val light = cell(palette.light)
+    val shadow = cell(palette.shadow)
+    val darkShadow = cell(palette.darkShadow)
+    val window = cell(palette.window)
+    val text = cell(palette.text)
+    val greyText = cell(palette.greyText)
+    val selection = cell(palette.selection)
+    val selectionText = cell(palette.selectionText)
+    val title = cell(palette.title)
+    val titleEnd = cell(palette.titleEnd)
+    val titleText = cell(palette.titleText)
+    val tooltip = cell(palette.tooltip)
+
+    /** A dark face, whose light edges are darker than any writing: what has to be turned round on it. */
+    val dark = palette.dark
+
+    /**
+     * What a groove cut into the face is drawn in, a trackbar's: the edge of it that shows. A sunken groove is shaded
+     * along its top and lit along its foot, and a cell has room for one colour of the two -- the shadow on 98's
+     * grey, where it stands out the more, and on a dark face, where the shadow all but vanishes, the light.
+     */
+    val groove = if (contrastRatio(palette.shadow, palette.face) >= contrastRatio(palette.highlight, palette.face)) shadow else highlight
+
+    companion object {
+        /** 98 as it shipped. */
+        val STANDARD = W98(Windows98Palette.STANDARD)
+
+        /** Noctorium 98. */
+        val NOCTORIUM = W98(Windows98Palette.NOCTORIUM)
+
+        /** The cells for [palette]: the two shipped ones are made once, as every frame asks for one. */
+        fun of(palette: Windows98Palette): W98 = when (palette) {
+            Windows98Palette.STANDARD -> STANDARD
+            Windows98Palette.NOCTORIUM -> NOCTORIUM
+            else -> W98(palette)
+        }
+    }
 }
 
 /** Luna's colours ([WindowsXpColours]), for cells. */
@@ -70,7 +100,8 @@ internal object Xp {
  * down its right, each an eighth of the cell thick, and most terminals draw them themselves rather than from
  * a font, so they meet. A slab is lit from the top left -- white along those edges, black along the others --
  * and a well the other way round; a slab's edges are drawn in the cells round it, so the slab keeps every
- * cell of its own for what it holds. Every colour is core's, so the terminal's 98 is the desktop's grey.
+ * cell of its own for what it holds. Every colour is core's, so the terminal's 98 is the desktop's grey and its
+ * Noctorium 98 the desktop's night: 98's colours are its scheme's, [Palette.w98], never a grey of their own.
  */
 object Skin {
     const val TOP = "▔"
@@ -80,31 +111,39 @@ object Skin {
 
     private fun xp(p: Palette) = p.skin == ThemeSkin.WINDOWS_XP
 
-    /** The face every slab is made of: 98's grey, or Luna's beige. */
-    fun face(p: Palette): Rgb = if (xp(p)) Xp.FACE else W98.FACE
+    /** The face every slab is made of: 98's grey or its night's violet, or Luna's beige. */
+    fun face(p: Palette): Rgb = if (xp(p)) Xp.FACE else p.w98.face
 
-    /** Where a list or a field sits: white, in both. */
-    fun window(p: Palette): Rgb = if (xp(p)) Xp.WINDOW else W98.WINDOW
+    /** Where a list or a field sits: white in both, or black in Noctorium 98. */
+    fun window(p: Palette): Rgb = if (xp(p)) Xp.WINDOW else p.w98.window
 
-    fun text(p: Palette): Rgb = if (xp(p)) Xp.TEXT else W98.TEXT
+    fun text(p: Palette): Rgb = if (xp(p)) Xp.TEXT else p.w98.text
 
     /** Writing on something that cannot be used, and the quieter writing beside the rest. */
-    fun greyText(p: Palette): Rgb = if (xp(p)) mix(Xp.GREY_TEXT, Xp.TEXT, .3f) else W98.GREY_TEXT
+    fun greyText(p: Palette): Rgb = if (xp(p)) mix(Xp.GREY_TEXT, Xp.TEXT, .3f) else p.w98.greyText
 
-    fun selection(p: Palette): Rgb = if (xp(p)) Xp.SELECTION else W98.SELECTION
+    fun selection(p: Palette): Rgb = if (xp(p)) Xp.SELECTION else p.w98.selection
 
-    fun selectionText(p: Palette): Rgb = if (xp(p)) Xp.SELECTION_TEXT else W98.SELECTION_TEXT
+    fun selectionText(p: Palette): Rgb = if (xp(p)) Xp.SELECTION_TEXT else p.w98.selectionText
 
     /** The writing on a title bar, and the quieter writing after its title. */
-    fun titleText(p: Palette): Rgb = if (xp(p)) Xp.TITLE_TEXT else W98.TITLE_TEXT
+    fun titleText(p: Palette): Rgb = if (xp(p)) Xp.TITLE_TEXT else p.w98.titleText
 
-    fun titleQuiet(p: Palette): Rgb = if (xp(p)) mix(Xp.TITLE_TEXT, Xp.TITLE, .25f) else W98.LIGHT
+    /**
+     * 98 wrote it in the light grey of its bevels, which in a dark scheme is a dark colour and would vanish into
+     * the bar; there it is the title's own writing, dimmed towards the bar's lighter end as far as 98's grey was.
+     */
+    fun titleQuiet(p: Palette): Rgb = when {
+        xp(p) -> mix(Xp.TITLE_TEXT, Xp.TITLE, .25f)
+        p.w98.dark -> mix(p.w98.titleText, p.w98.titleEnd, .25f)
+        else -> p.w98.light
+    }
 
     /** The colours a title bar runs between, from its left end to its right. */
-    private fun titleColours(p: Palette): Pair<Rgb, Rgb> = if (xp(p)) Xp.TITLE to Xp.TITLE_LOW else W98.TITLE to W98.TITLE_END
+    private fun titleColours(p: Palette): Pair<Rgb, Rgb> = if (xp(p)) Xp.TITLE to Xp.TITLE_LOW else p.w98.title to p.w98.titleEnd
 
-    /** The pale yellow of a tooltip, which both drew with a thin black edge. */
-    fun tooltip(p: Palette): Rgb = if (xp(p)) Xp.TOOLTIP else W98.TOOLTIP
+    /** A tooltip's face, which both drew with a thin edge in the writing's colour: pale yellow, or 98's night. */
+    fun tooltip(p: Palette): Rgb = if (xp(p)) Xp.TOOLTIP else p.w98.tooltip
 
     /**
      * A line of [w] cells from [x], each a step of the way from [from] to [to]: the title bars of both, which
@@ -159,9 +198,9 @@ object Skin {
             canvas.set(x + 1, y, "×", Xp.TITLE_TEXT, Xp.CLOSE, BOLD)
             canvas.set(x + 2, y, RIGHT, rim, Xp.CLOSE)
         } else {
-            canvas.set(x, y, LEFT, W98.HIGHLIGHT, W98.FACE)
-            canvas.set(x + 1, y, "×", W98.TEXT, W98.FACE, BOLD)
-            canvas.set(x + 2, y, RIGHT, W98.DARK_SHADOW, W98.FACE)
+            canvas.set(x, y, LEFT, p.w98.highlight, p.w98.face)
+            canvas.set(x + 1, y, "×", p.w98.text, p.w98.face, BOLD)
+            canvas.set(x + 2, y, RIGHT, p.w98.darkShadow, p.w98.face)
         }
         tui.clickTargets += Tui.ClickTarget(x, y, 3, 1) { close() }
     }
@@ -186,7 +225,7 @@ object Skin {
             canvas.set(x - 1, y, "▗", Xp.TITLE)
             canvas.set(x + w, y, "▖", Xp.TITLE_LOW)
         } else {
-            edges(canvas, x, y, w, h, W98.LIGHT, W98.DARK_SHADOW)
+            edges(canvas, x, y, w, h, p.w98.light, p.w98.darkShadow)
         }
         titleBar(tui, canvas, x, y, w, title, close = close)
     }
@@ -197,7 +236,7 @@ object Skin {
      */
     fun frame(canvas: Canvas, p: Palette, x: Int, y: Int, w: Int, h: Int) {
         if (xp(p)) edges(canvas, x, y, w, h, Xp.FIELD_EDGE, Xp.FIELD_EDGE)
-        else edges(canvas, x, y, w, h, W98.SHADOW, W98.HIGHLIGHT)
+        else edges(canvas, x, y, w, h, p.w98.shadow, p.w98.highlight)
     }
 
     /**
@@ -208,7 +247,7 @@ object Skin {
     fun well(canvas: Canvas, p: Palette, x: Int, y: Int, w: Int, h: Int, top: Boolean = true, foot: Boolean = false) {
         canvas.fill(x, y, w, h, window(p))
         if (xp(p)) edges(canvas, x, y, w, h, Xp.FIELD_EDGE, Xp.FIELD_EDGE, top, foot)
-        else edges(canvas, x, y, w, h, W98.SHADOW, W98.HIGHLIGHT, top, foot)
+        else edges(canvas, x, y, w, h, p.w98.shadow, p.w98.highlight, top, foot)
     }
 
     /**
@@ -230,14 +269,14 @@ object Skin {
     ): Int {
         val w = Canvas.displayWidth(label) + 4
         val xp = xp(p)
-        val face = if (xp) mix(Xp.WINDOW, Xp.BUTTON_FOOT, .3f) else W98.FACE
+        val face = if (xp) mix(Xp.WINDOW, Xp.BUTTON_FOOT, .3f) else p.w98.face
         // 98 lit a slab along its top and left and shaded it along its foot and right, the default button more
         // deeply; XP edged its button all round in dark blue, and the default one's foot in the blue of focus.
-        val lit = if (xp) Xp.BUTTON_EDGE else W98.HIGHLIGHT
+        val lit = if (xp) Xp.BUTTON_EDGE else p.w98.highlight
         val shaded = when {
             xp -> Xp.BUTTON_EDGE
-            default -> W98.DARK_SHADOW
-            else -> W98.SHADOW
+            default -> p.w98.darkShadow
+            else -> p.w98.shadow
         }
         canvas.fill(x, y, w, 1, face)
         canvas.set(x, y, LEFT, lit, face)
@@ -268,11 +307,11 @@ object Skin {
             for (r in at until at + thumb) canvas.set(x, y + 1 + r, RIGHT, Xp.SCROLL_EDGE, Xp.SCROLL_THUMB)
             if (thumb >= 3) canvas.set(x, y + 1 + at + thumb / 2, "≡", Xp.SCROLL_EDGE, Xp.SCROLL_THUMB, BOLD)
         } else {
-            for (r in 0 until track) canvas.set(x, y + 1 + r, "▒", W98.HIGHLIGHT, W98.FACE)
-            canvas.set(x, y, "▲", W98.TEXT, W98.FACE)
-            canvas.set(x, y + h - 1, "▼", W98.TEXT, W98.FACE)
-            for (r in at until at + thumb) canvas.set(x, y + 1 + r, RIGHT, W98.DARK_SHADOW, W98.FACE)
-            canvas.set(x, y + 1 + at, if (thumb > 1) TOP else RIGHT, if (thumb > 1) W98.HIGHLIGHT else W98.DARK_SHADOW, W98.FACE)
+            for (r in 0 until track) canvas.set(x, y + 1 + r, "▒", p.w98.highlight, p.w98.face)
+            canvas.set(x, y, "▲", p.w98.text, p.w98.face)
+            canvas.set(x, y + h - 1, "▼", p.w98.text, p.w98.face)
+            for (r in at until at + thumb) canvas.set(x, y + 1 + r, RIGHT, p.w98.darkShadow, p.w98.face)
+            canvas.set(x, y + 1 + at, if (thumb > 1) TOP else RIGHT, if (thumb > 1) p.w98.highlight else p.w98.darkShadow, p.w98.face)
         }
     }
 
@@ -281,7 +320,7 @@ object Skin {
         val colour = when {
             xp(p) && chosen -> Xp.PROGRESS
             xp(p) -> Xp.FIELD_EDGE
-            else -> W98.TEXT
+            else -> p.w98.text
         }
         canvas.set(x, y, if (chosen) "◉" else "○", colour, null, BOLD)
     }

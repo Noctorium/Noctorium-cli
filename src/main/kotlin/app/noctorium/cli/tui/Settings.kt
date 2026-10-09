@@ -757,9 +757,12 @@ object Settings {
             "from vk.ru. They stay on this computer, in its credential store.",
     )
 
-    /** "Catppuccin Mocha", "Noctorium Night", and "Nord" rather than "Nord Nord". */
+    /**
+     * "Catppuccin Mocha", "Noctorium Night", and "Nord" rather than "Nord Nord" -- or "Noctorium 98" rather than
+     * "Windows Noctorium 98": a name that already starts with a family's, its own or another's, says whose it is.
+     */
     fun themeName(theme: ThemePreset): String = when {
-        theme.displayName.startsWith(theme.family) -> theme.displayName
+        ThemePreset.entries.any { theme.displayName.startsWith(it.family) } -> theme.displayName
         else -> "${theme.family} ${theme.displayName}"
     }
 

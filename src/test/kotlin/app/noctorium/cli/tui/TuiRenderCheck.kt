@@ -47,16 +47,16 @@ class TuiRenderCheck {
     }
 
     /**
-     * Every seek bar, a song of four minutes and nine a minute and a half in, under four themes: a dark one, a
-     * light one and the two Windows ones -- each with the rows round it free, and without.
+     * Every seek bar, a song of four minutes and nine a minute and a half in, under five themes: a dark one, a
+     * light one and the three Windows ones -- each with the rows round it free, and without.
      */
     @Test
     fun `the seek bars draw`() {
         val folder = folder ?: return
-        val themes = listOf(ThemePreset.NOCTORIUM_NIGHT, ThemePreset.CATPPUCCIN_LATTE, ThemePreset.WINDOWS_98, ThemePreset.WINDOWS_XP)
+        val themes = listOf(ThemePreset.NOCTORIUM_NIGHT, ThemePreset.CATPPUCCIN_LATTE, ThemePreset.WINDOWS_98, ThemePreset.WINDOWS_XP, ThemePreset.WINDOWS_98_NOCTORIUM)
         val styles = ProgressBarStyle.entries
-        val canvas = Canvas(150, styles.size * 4 + 2)
         val columnW = 37
+        val canvas = Canvas(maxOf(150, themes.size * columnW + 1), styles.size * 4 + 2)
         canvas.clear(0x202020, 0xDDDDDD)
         themes.forEachIndexed { t, theme ->
             val p = Palette.from(NoctoriumPreferences(theme = theme), null, false)
@@ -144,12 +144,17 @@ class TuiRenderCheck {
             }
             tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
 
-            // The two Windows themes, drawn as themselves: the pages, a list, Settings, Now playing, the dialogs,
+            // The three Windows themes, drawn as themselves: the pages, a list, Settings, Now playing, the dialogs,
             // a tooltip and the taskbar, wide and narrow.
-            for ((theme, style) in listOf(ThemePreset.WINDOWS_98 to ProgressBarStyle.CLASSIC, ThemePreset.WINDOWS_XP to ProgressBarStyle.MATERIAL)) {
+            val windows = listOf(
+                ThemePreset.WINDOWS_98 to ProgressBarStyle.CLASSIC,
+                ThemePreset.WINDOWS_XP to ProgressBarStyle.MATERIAL,
+                ThemePreset.WINDOWS_98_NOCTORIUM to ProgressBarStyle.CLASSIC,
+            )
+            for ((theme, style) in windows) {
                 state.setTheme(theme)
                 state.setProgressBarStyle(style)
-                val name = theme.name.lowercase().removePrefix("windows_")
+                val name = if (theme == ThemePreset.WINDOWS_98_NOCTORIUM) "noctorium-98" else theme.name.lowercase().removePrefix("windows_")
                 for (page in listOf(Page.HOME, Page.SEARCH, Page.QUEUE, Page.NOW_PLAYING)) {
                     tui.page = page
                     write(folder, "$name-${page.name.lowercase().replace('_', '-')}", tui)
@@ -178,7 +183,7 @@ class TuiRenderCheck {
                 tui.overlays.addLast(Overlay.Checklist("Hybrid search asks", listOf("YouTube Music", "SoundCloud", "Bandcamp", "Spotify", "VK Music"), listOf(0, 2), "Spotify only while its songs play on Spotify") {})
                 write(folder, "$name-checklist", tui)
                 tui.overlays.clear()
-                tui.toast("Theme: Windows ${theme.displayName}")
+                tui.toast("Theme: ${Settings.themeName(theme)}")
                 tui.preferences.playerBar = TuiPlayerBar.TASKBAR
                 write(folder, "$name-taskbar", tui)
                 write(folder, "$name-taskbar-narrow", tui, 84, 24)
@@ -192,7 +197,28 @@ class TuiRenderCheck {
                 tui.preferences.playerBar = TuiPlayerBar.FULL
                 tui.page = Page.HOME
                 write(folder, "$name-home-narrow", tui, 90, 30)
+
+                // The theme picker, open over Settings with this theme chosen in it.
+                tui.page = Page.SETTINGS
+                Settings.rows(tui).filterIsInstance<Row.Action>().first { it.label == "Theme" }.run()
+                write(folder, "$name-themes", tui)
+                tui.overlays.clear()
             }
+
+            // Noctorium 98 with 98's trackbar for a seek bar, and as a terminal of 256 colours shows it.
+            state.setTheme(ThemePreset.WINDOWS_98_NOCTORIUM)
+            state.setProgressBarStyle(ProgressBarStyle.MATERIAL)
+            tui.page = Page.NOW_PLAYING
+            write(folder, "noctorium-98-now-playing-trackbar", tui)
+            state.setProgressBarStyle(ProgressBarStyle.CLASSIC)
+            for (page in listOf(Page.QUEUE, Page.NOW_PLAYING, Page.SETTINGS)) {
+                tui.page = page
+                write(folder, "noctorium-98-${page.name.lowercase().replace('_', '-')}-256", tui, colours256 = true)
+            }
+            tui.preferences.playerBar = TuiPlayerBar.TASKBAR
+            tui.page = Page.QUEUE
+            write(folder, "noctorium-98-taskbar-256", tui, colours256 = true)
+            tui.preferences.playerBar = TuiPlayerBar.FULL
         } finally {
             state.setTaskbarClock(true)
             tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
@@ -208,9 +234,30 @@ class TuiRenderCheck {
         while (!done() && System.currentTimeMillis() < until) Thread.sleep(150)
     }
 
-    private fun write(folder: File, name: String, tui: Tui, w: Int = 150, h: Int = 42) {
+    private fun write(folder: File, name: String, tui: Tui, w: Int = 150, h: Int = 42, colours256: Boolean = false) {
         tui.frame(w, h)
         Thread.sleep(300)
-        Frames.write(folder, name, tui.frame(w, h))
+        val frame = tui.frame(w, h)
+        Frames.write(folder, name, if (colours256) folded(frame) else frame)
+    }
+
+    /** [canvas] as a terminal of only 256 colours shows it: each colour folded into the nearest, as [Screen] sends it. */
+    private fun folded(canvas: Canvas): Canvas {
+        val levels = intArrayOf(0, 95, 135, 175, 215, 255)
+        fun shown(c: Rgb): Rgb {
+            if (c == DEFAULT) return c
+            val index = Screen.xterm256(c shr 16 and 0xFF, c shr 8 and 0xFF, c and 0xFF)
+            if (index >= 232) return (8 + 10 * (index - 232)) * 0x010101
+            val n = index - 16
+            return (levels[n / 36] shl 16) or (levels[n / 6 % 6] shl 8) or levels[n % 6]
+        }
+        val copy = Canvas(canvas.width, canvas.height)
+        for (i in canvas.text.indices) {
+            copy.text[i] = canvas.text[i]
+            copy.style[i] = canvas.style[i]
+            copy.fg[i] = shown(canvas.fg[i])
+            copy.bg[i] = shown(canvas.bg[i])
+        }
+        return copy
     }
 }

@@ -208,7 +208,7 @@ object PlayerBar {
         val trayX = x + w - trayW
         val trayBg = when {
             xp -> Xp.TRAY
-            theme.skinned -> W98.FACE
+            theme.skinned -> theme.w98.face
             else -> theme.card
         }
         canvas.fill(trayX, row, trayW, 1, trayBg)
@@ -222,8 +222,8 @@ object PlayerBar {
             }
             theme.skinned -> {
                 // 98's tray is sunk into the bar.
-                canvas.set(trayX, row, Skin.LEFT, W98.SHADOW, W98.FACE)
-                canvas.set(trayX + trayW - 1, row, Skin.RIGHT, W98.HIGHLIGHT, W98.FACE)
+                canvas.set(trayX, row, Skin.LEFT, theme.w98.shadow, trayBg)
+                canvas.set(trayX + trayW - 1, row, Skin.RIGHT, theme.w98.highlight, trayBg)
             }
         }
         volume(tui, canvas, trayX + 1, row, trayBg, p.accent, if (theme.skinned) p.line else p.faint)
@@ -270,10 +270,10 @@ object PlayerBar {
     private fun taskButton(canvas: Canvas, p: Palette, x: Int, y: Int, w: Int, pressed: Boolean, bg: Rgb): Rgb = when (p.skin) {
         ThemeSkin.WINDOWS_98 -> {
             // Pressed, 98 filled it with a dither of white and grey, and lit it from the other side.
-            val face = if (pressed) W98.LIGHT else W98.FACE
+            val face = if (pressed) p.w98.light else p.w98.face
             canvas.fill(x, y, w, 1, face)
-            canvas.set(x, y, Skin.LEFT, if (pressed) W98.DARK_SHADOW else W98.HIGHLIGHT, face)
-            canvas.set(x + w - 1, y, Skin.RIGHT, if (pressed) W98.HIGHLIGHT else W98.DARK_SHADOW, face)
+            canvas.set(x, y, Skin.LEFT, if (pressed) p.w98.darkShadow else p.w98.highlight, face)
+            canvas.set(x + w - 1, y, Skin.RIGHT, if (pressed) p.w98.highlight else p.w98.darkShadow, face)
             face
         }
         ThemeSkin.WINDOWS_XP -> {
@@ -298,7 +298,7 @@ object PlayerBar {
 
     /** The bar's top edge: a line, or a Windows theme's lit edge along the top of a raised bar. */
     private fun edge(canvas: Canvas, p: Palette, x: Int, y: Int, w: Int, bg: Rgb) {
-        if (p.skinned) for (c in x until x + w) canvas.set(c, y, Skin.TOP, if (p.skin == ThemeSkin.WINDOWS_XP) Xp.WINDOW else W98.HIGHLIGHT, bg)
+        if (p.skinned) for (c in x until x + w) canvas.set(c, y, Skin.TOP, if (p.skin == ThemeSkin.WINDOWS_XP) Xp.WINDOW else p.w98.highlight, bg)
         else for (c in x until x + w) canvas.set(c, y, "─", p.line, bg)
     }
 

@@ -9,6 +9,7 @@ import app.noctorium.playback.PlaybackEngine
 import app.noctorium.playback.PlaybackState
 import app.noctorium.playback.PlaybackStatus
 import app.noctorium.settings.NoctoriumPreferences
+import app.noctorium.settings.ProgressBarStyle
 import app.noctorium.settings.ThemePreset
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,8 +19,10 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 /**
@@ -174,8 +177,8 @@ class LooksTest {
         tui.page = Page.QUEUE
         val canvas = render()
         // Navy at its left end, running towards 98's lighter blue along it, with the close button at its right.
-        assertEquals(W98.TITLE, canvas.bg[0])
-        assertEquals(mix(W98.TITLE, W98.TITLE_END, 100 / 149f), canvas.bg[100])
+        assertEquals(W98.STANDARD.title, canvas.bg[0])
+        assertEquals(mix(W98.STANDARD.title, W98.STANDARD.titleEnd, 100 / 149f), canvas.bg[100])
         assertEquals("×", canvas.text[147])
         click(canvas, "×", row = 0)
         val confirm = tui.overlays.last()
@@ -218,14 +221,115 @@ class LooksTest {
         val canvas = render()
         val row = lines(canvas).indexOfFirst { "Awake" in it && "Tycho" in it && it.indexOf("Awake") > 22 }
         val at = row * canvas.width + lines(canvas)[row].indexOf("Awake")
-        assertEquals(W98.SELECTION, canvas.bg[at])
-        assertEquals(W98.SELECTION_TEXT, canvas.fg[at])
+        assertEquals(W98.STANDARD.selection, canvas.bg[at])
+        assertEquals(W98.STANDARD.selectionText, canvas.fg[at])
+    }
+
+    @Test
+    fun `the 98 skin is drawn in the scheme of the theme in force, 98's own grey or Noctorium 98's night`() {
+        fun scheme(theme: ThemePreset) = Palette.from(NoctoriumPreferences(theme = theme), null, ownBackground = false).w98
+        assertSame(W98.STANDARD, scheme(ThemePreset.WINDOWS_98))
+        assertSame(W98.NOCTORIUM, scheme(ThemePreset.WINDOWS_98_NOCTORIUM))
+        // 98's cells are its system colours exactly, so the grey 98 is as it always was.
+        assertEquals(listOf(0xC0C0C0, 0xFFFFFF, 0xDFDFDF, 0x808080, 0x000000), W98.STANDARD.run { listOf(face, highlight, light, shadow, darkShadow) })
+        assertEquals(listOf(0x000080, 0x1084D0, 0xFFFFE1), W98.STANDARD.run { listOf(title, titleEnd, tooltip) })
+        assertEquals(listOf(0x231B2E, 0x0B0810, 0x2B0E5C, 0x8B5CF6), W98.NOCTORIUM.run { listOf(face, window, title, titleEnd) })
+        assertFalse(W98.STANDARD.dark)
+        assertTrue(W98.NOCTORIUM.dark)
+    }
+
+    @Test
+    fun `Noctorium 98 is 98 at night, with nothing of 98's grey left on any page, bar or dialog`() {
+        playing()
+        theme(ThemePreset.WINDOWS_98_NOCTORIUM)
+        val night = W98.NOCTORIUM
+        tui.page = Page.QUEUE
+        var canvas = render()
+        assertEquals(night.title, canvas.bg[0])
+        assertEquals(mix(night.title, night.titleEnd, 100 / 149f), canvas.bg[100])
+        val row = lines(canvas).indexOfFirst { "Awake" in it && "Tycho" in it && it.indexOf("Awake") > 22 }
+        val at = row * canvas.width + lines(canvas)[row].indexOf("Awake")
+        assertEquals(night.selection, canvas.bg[at])
+        assertEquals(night.selectionText, canvas.fg[at])
+
+        // The colours only 98's grey scheme has: its face and bevels, its navy and blue, its pale yellow.
+        val grey = setOf(0xC0C0C0, 0xDFDFDF, 0x808080, 0x000080, 0x1084D0, 0xFFFFE1)
+        fun clean(what: String) {
+            val left = (0 until canvas.width * canvas.height).filter { canvas.fg[it] in grey || canvas.bg[it] in grey }
+            assertTrue(left.isEmpty(), "$what has 98's grey at ${left.take(5).map { it % canvas.width to it / canvas.width }}:\n" + lines(canvas).joinToString("\n"))
+        }
+        val dialogs = listOf(
+            Overlay.Help,
+            Overlay.Confirm("Clear the queue?", "Playback stops too.") {},
+            Overlay.Prompt("Rename", "A new name.", "Night drive") {},
+            Overlay.Checklist("Hybrid search asks", listOf("YouTube Music", "Bandcamp"), listOf(1), "A note") {},
+            Overlays.sleepTimer(tui),
+        )
+        for (style in listOf(ProgressBarStyle.CLASSIC, ProgressBarStyle.MATERIAL)) {
+            state.setProgressBarStyle(style)
+            waitFor { state.settings.value.preferences.progressBarStyle == style }
+            for (bar in TuiPlayerBar.entries) {
+                tui.preferences.playerBar = bar
+                for (page in Page.entries) {
+                    tui.page = page
+                    canvas = render()
+                    clean("$page under the $bar bar with the $style seek bar")
+                }
+                for (dialog in dialogs) {
+                    tui.overlays.addLast(dialog)
+                    canvas = render()
+                    clean("$dialog under the $bar bar")
+                    tui.overlays.clear()
+                }
+            }
+        }
+        tui.toast("Theme: Noctorium 98")
+        canvas = render()
+        clean("A tooltip")
+    }
+
+    @Test
+    fun `Noctorium 98 is offered beside 98 and XP by its own name, and is in force as soon as it is chosen`() {
+        assertEquals("Noctorium 98", Settings.themeName(ThemePreset.WINDOWS_98_NOCTORIUM))
+        assertEquals("Windows 98", Settings.themeName(ThemePreset.WINDOWS_98))
+        assertEquals("Nord", Settings.themeName(ThemePreset.NORD))
+        assertEquals("Catppuccin Mocha", Settings.themeName(ThemePreset.CATPPUCCIN_MOCHA))
+
+        tui.page = Page.SETTINGS
+        Settings.rows(tui).filterIsInstance<Row.Action>().first { it.label == "Theme" }.run()
+        val picker = assertIs<Overlay.Picker>(tui.overlays.last())
+        val names = picker.options.map { it.first }
+        assertEquals(20, names.size)
+        assertEquals(listOf("Windows 98", "Noctorium 98", "Windows XP"), names.subList(names.indexOf("Windows 98"), names.indexOf("Windows 98") + 3))
+        picker.options.first { it.first == "Noctorium 98" }.second()
+        waitFor { state.settings.value.preferences.theme == ThemePreset.WINDOWS_98_NOCTORIUM }
+        tui.overlays.clear()
+        assertEquals(W98.NOCTORIUM.title, render().bg[0])
+
+        // Stepping through the themes from 98 lands on it next, and says so by its name.
+        theme(ThemePreset.WINDOWS_98)
+        tui.cycleTheme(1)
+        waitFor { state.settings.value.preferences.theme == ThemePreset.WINDOWS_98_NOCTORIUM }
+        assertTrue(lines(render()).any { "Theme: Noctorium 98" in it })
+    }
+
+    @Test
+    fun `Noctorium 98's edges stay apart in a terminal of 256 colours`() {
+        val night = W98.NOCTORIUM
+        fun folded(c: Rgb) = Screen.xterm256(c shr 16 and 0xFF, c shr 8 and 0xFF, c and 0xFF)
+        // A bevel is its face between a lit edge and a shaded one; a well, the window inside a sunken edge.
+        val edges = listOf(night.face, night.highlight, night.light, night.shadow, night.darkShadow, night.window)
+        assertEquals(edges.size, edges.map(::folded).toSet().size)
+        assertNotEquals(folded(night.title), folded(night.titleEnd))
+        assertNotEquals(folded(night.selection), folded(night.window))
+        assertNotEquals(folded(night.text), folded(night.greyText))
     }
 
     @Test
     fun `the Windows themes keep their own page when the terminal's background is asked for, and the others give it up`() {
         fun page(theme: ThemePreset) = Palette.from(NoctoriumPreferences(theme = theme), null, ownBackground = true).page
         assertEquals(0xC0C0C0, page(ThemePreset.WINDOWS_98))
+        assertEquals(0x231B2E, page(ThemePreset.WINDOWS_98_NOCTORIUM))
         assertEquals(0xECE9D8, page(ThemePreset.WINDOWS_XP))
         assertEquals(DEFAULT, page(ThemePreset.NOCTORIUM_NIGHT))
         assertEquals(DEFAULT, page(ThemePreset.CATPPUCCIN_LATTE))
@@ -278,7 +382,7 @@ class LooksTest {
             Overlay.Picker("Sleep timer", listOf("In 15 minutes" to {}, "At the end of this track" to {}), "A note"),
             Overlay.Checklist("Hybrid search asks", listOf("YouTube Music", "Bandcamp"), listOf(1), "A note") {},
         )
-        for (theme in listOf(ThemePreset.NOCTORIUM_NIGHT, ThemePreset.CATPPUCCIN_LATTE, ThemePreset.WINDOWS_98, ThemePreset.WINDOWS_XP)) {
+        for (theme in listOf(ThemePreset.NOCTORIUM_NIGHT, ThemePreset.CATPPUCCIN_LATTE, ThemePreset.WINDOWS_98, ThemePreset.WINDOWS_98_NOCTORIUM, ThemePreset.WINDOWS_XP)) {
             theme(theme)
             for (bar in TuiPlayerBar.entries) for (layout in TuiNowPlaying.entries) {
                 tui.preferences.playerBar = bar

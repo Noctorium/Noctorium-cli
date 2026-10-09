@@ -34,9 +34,9 @@ noctorium web                   the web player, for any browser on your network
   private and deleted there.
 - **Synced lyrics** from eight sources, lit up line by line as they are sung, with the source switched
   right on the lyrics (`[` and `]`).
-- **Covers in the terminal**, drawn in half blocks, and all of Noctorium's nineteen themes — the Windows 98
-  and XP ones drawn as themselves, title bars, bevels, taskbar and all — the seek bar in each of its eleven
-  styles, and the accent taken from the cover if you like. The player bar is full, one compact row or a
+- **Covers in the terminal**, drawn in half blocks, and all of Noctorium's twenty themes — the Windows 98,
+  Noctorium 98 and XP ones drawn as themselves, title bars, bevels, taskbar and all — the seek bar in each of
+  its eleven styles, and the accent taken from the cover if you like. The player bar is full, one compact row or a
   taskbar; Now playing is the cover beside the lyrics, a poster in big type, the cover alone or the lyrics
   large.
 - **Scrobbling** to Last.fm and ListenBrainz, Discord presence, downloads to keep, a sleep timer,
