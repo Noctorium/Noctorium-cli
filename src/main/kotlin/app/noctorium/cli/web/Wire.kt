@@ -19,8 +19,10 @@ import app.noctorium.settings.DEFAULT_HYBRID_SEARCH
 import app.noctorium.settings.ProgressBarStyle
 import app.noctorium.settings.ThemePreset
 import app.noctorium.settings.ThemeSkin
+import app.noctorium.settings.Windows98Palette
 import app.noctorium.settings.resolvedAccent
 import app.noctorium.settings.themeColours
+import app.noctorium.settings.windows98Palette
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -285,10 +287,39 @@ data class WTheme(
     val light: Boolean,
     /**
      * How the theme is drawn beyond its colours, by ThemeSkin's name: STANDARD for nearly all, WINDOWS_98 and
-     * WINDOWS_XP for the two that draw their bevels, title bars and taskbars, which the page draws from the
+     * WINDOWS_XP for the ones that draw their bevels, title bars and taskbars, which the page draws from the
      * same system colours as every other Noctorium.
      */
     val skin: String = ThemeSkin.STANDARD.name,
+    /**
+     * With the 98 skin, the scheme it is drawn in: 98's own grey for Windows 98, Noctorium's night for Noctorium 98.
+     * Absent for every other skin.
+     */
+    val windows98: WWindows98? = null,
+)
+
+/** A [Windows98Palette]: the colours of every bevel, title bar, list and desktop the 98 skin draws, as "#rrggbb". */
+@Serializable
+data class WWindows98(
+    val face: String,
+    val highlight: String,
+    val light: String,
+    val shadow: String,
+    val darkShadow: String,
+    val window: String,
+    val text: String,
+    val greyText: String,
+    val selection: String,
+    val selectionText: String,
+    val title: String,
+    val titleEnd: String,
+    val inactiveTitle: String,
+    val inactiveTitleEnd: String,
+    val titleText: String,
+    val tooltip: String,
+    val desktop: String,
+    /** A dark face, on which whatever 98 took to be pale has to be turned round. */
+    val dark: Boolean,
 )
 
 @Serializable
@@ -381,8 +412,17 @@ private fun argb(value: Long) = "#%06x".format(value and 0xFFFFFF)
 
 private fun ThemePreset.wire(custom: app.noctorium.settings.ThemeColours): WTheme {
     val c = colours ?: custom
-    return WTheme(name, displayName, family, argb(c.background), argb(c.panel), argb(c.card), argb(c.text), argb(c.subtext), argb(c.accent), c.light, skin.name)
+    return WTheme(
+        name, displayName, family, argb(c.background), argb(c.panel), argb(c.card), argb(c.text), argb(c.subtext), argb(c.accent), c.light, skin.name,
+        windows98 = windows98Palette.wire().takeIf { skin == ThemeSkin.WINDOWS_98 },
+    )
 }
+
+private fun Windows98Palette.wire() = WWindows98(
+    argb(face), argb(highlight), argb(light), argb(shadow), argb(darkShadow), argb(window), argb(text), argb(greyText),
+    argb(selection), argb(selectionText), argb(title), argb(titleEnd), argb(inactiveTitle), argb(inactiveTitleEnd),
+    argb(titleText), argb(tooltip), argb(desktop), dark,
+)
 
 /** The parts of the state, each as JSON, by the name the page knows them by. */
 class Wire(private val state: AppState, private val engine: SwitchingEngine) {

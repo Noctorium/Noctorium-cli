@@ -87,4 +87,32 @@ class LooksWebTest {
         assertEquals("WINDOWS_XP", colours.string("skin"))
         assertEquals("#ece9d8", colours.string("background"))
     }
+
+    @Test
+    fun `the 98 themes say which scheme their skin is drawn in, and the one in force says it too`() {
+        val themes = settings().getValue("themes").jsonArray.map { it.jsonObject }.associateBy { it.string("name") }
+        assertEquals("WINDOWS_98", themes.getValue("WINDOWS_98_NOCTORIUM").string("skin"))
+        assertEquals("Noctorium 98", themes.getValue("WINDOWS_98_NOCTORIUM").string("title"))
+        val grey = themes.getValue("WINDOWS_98").getValue("windows98").jsonObject
+        assertEquals("#c0c0c0", grey.string("face"))
+        assertEquals("#000080", grey.string("title"))
+        assertEquals("#008080", grey.string("desktop"))
+        assertEquals(false, grey.getValue("dark").jsonPrimitive.boolean)
+        val night = themes.getValue("WINDOWS_98_NOCTORIUM").getValue("windows98").jsonObject
+        assertEquals("#231b2e", night.string("face"))
+        assertEquals("#0b0810", night.string("window"))
+        assertEquals("#2b0e5c", night.string("title"))
+        assertEquals("#8b5cf6", night.string("titleEnd"))
+        assertEquals("#140a26", night.string("desktop"))
+        assertEquals(true, night.getValue("dark").jsonPrimitive.boolean)
+        // Only the 98 skin is drawn from a scheme.
+        assertNull(themes.getValue("WINDOWS_XP")["windows98"])
+        assertNull(themes.getValue("NOCTORIUM_NIGHT")["windows98"])
+
+        assertNull(run("theme", "WINDOWS_98_NOCTORIUM"))
+        waitFor { state.settings.value.preferences.theme == ThemePreset.WINDOWS_98_NOCTORIUM }
+        val colours = settings().getValue("colours").jsonObject
+        assertEquals("WINDOWS_98", colours.string("skin"))
+        assertEquals("#231b2e", colours.getValue("windows98").jsonObject.string("face"))
+    }
 }
