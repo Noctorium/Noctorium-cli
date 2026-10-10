@@ -93,6 +93,9 @@ tasks.test {
     systemProperty("noctorium.home", layout.buildDirectory.dir("test-home").get().asFile.absolutePath)
     // Where TuiRenderCheck draws the pages, when it is asked to.
     System.getProperty("noctorium.renderTui")?.let { systemProperty("noctorium.renderTui", it) }
+    // And whether it may also play to mpv's null output for the visualiser, with which mpv.
+    System.getProperty("noctorium.live")?.let { systemProperty("noctorium.live", it) }
+    System.getProperty("noctorium.mpv")?.let { systemProperty("noctorium.mpv", it) }
 }
 
 // --- The version, where the running program can read it ---

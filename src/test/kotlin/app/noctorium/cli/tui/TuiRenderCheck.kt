@@ -4,12 +4,20 @@ import app.noctorium.cli.CliParts
 import app.noctorium.cli.cliAppState
 import app.noctorium.domain.PlaybackOrigin
 import app.noctorium.domain.Track
+import app.noctorium.playback.AudioAnalysis
+import app.noctorium.playback.AudioAnalysisKind
+import app.noctorium.playback.MpvPlaybackEngine
 import app.noctorium.playback.PlaybackEngine
 import app.noctorium.playback.PlaybackState
 import app.noctorium.playback.PlaybackStatus
+import app.noctorium.playback.StreamFormat
 import app.noctorium.settings.NoctoriumPreferences
 import app.noctorium.settings.ProgressBarStyle
 import app.noctorium.settings.ThemePreset
+import app.noctorium.settings.VisualiserStyle
+import java.nio.file.Files
+import java.nio.file.Path
+import kotlin.math.sin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -29,12 +37,24 @@ import kotlin.test.Test
 class TuiRenderCheck {
     private val folder = System.getProperty("noctorium.renderTui")?.let(::File)
 
-    /** A player that plays nothing and says it is a minute and a half in. */
+    /**
+     * A player that plays nothing and says it is a minute and a half in. For the pictures of the new looks it also
+     * says what it plays as, and hands the visualiser a frame set by the test: a stand-in for the pictures only --
+     * the live check below draws the visualiser from a real mpv measuring real sound.
+     */
     private class StandIn : PlaybackEngine {
-        private val mutable = MutableStateFlow(PlaybackState())
+        val mutable = MutableStateFlow(PlaybackState())
         override val state: StateFlow<PlaybackState> = mutable
+        val frames = MutableStateFlow<AudioAnalysis?>(null)
+        override val analysis: StateFlow<AudioAnalysis?> get() = frames
+        override val analysisKind: AudioAnalysisKind get() = AudioAnalysisKind.SPECTRUM
+        override suspend fun setVolumeBoostPercent(percent: Int) = mutable.update { it.copy(volumeBoostPercent = percent, volumeBoostEnabled = percent > 100) }
         override suspend fun play(track: Track) = mutable.update {
-            PlaybackState(PlaybackStatus.PLAYING, track, positionMs = 94_000, durationMs = track.durationMs ?: 240_000, volume = .72f)
+            PlaybackState(
+                PlaybackStatus.PLAYING, track, positionMs = 94_000, durationMs = track.durationMs ?: 240_000, volume = .72f,
+                volumeBoostPercent = it.volumeBoostPercent, volumeBoostEnabled = it.volumeBoostEnabled,
+                format = StreamFormat("opus", 48_000, 2, 133_000),
+            )
         }
         override suspend fun pause() = mutable.update { it.copy(status = PlaybackStatus.PAUSED) }
         override suspend fun resume() = mutable.update { it.copy(status = PlaybackStatus.PLAYING) }
@@ -226,6 +246,193 @@ class TuiRenderCheck {
             state.setTheme(ThemePreset.NOCTORIUM_NIGHT)
             state.setProgressBarStyle(ProgressBarStyle.MINIMAL)
             state.close()
+        }
+    }
+
+    /**
+     * The new looks -- the Toolbar, the Playlist layout with its visualiser and status bar, the volume panel, the
+     * settings search and the symbols -- in a dark theme, a light one, the three Windows ones, and 256 colours.
+     */
+    @Test
+    fun `the new looks draw`() {
+        val folder = folder ?: return
+        folder.mkdirs()
+        val parts = CliParts()
+        val player = StandIn()
+        val state = cliAppState(parts, player)
+        val tui = Tui(state, parts, web = null)
+        // A spectrum's shape for the pictures: more in the bass, a little less each octave up.
+        fun spectrum(t: Double) = AudioAnalysis(
+            bands = List(10) { band -> (.86 - band * .045 + .1 * sin(t + band * 1.3)).toFloat().coerceIn(0f, 1f) },
+            peaks = listOf(.93f, .88f),
+            rms = listOf(.71f, .66f),
+        )
+        try {
+            state.setAutoplay(false)
+            state.search("Amazing Grace Judy Collins")
+            waitFor(30_000) { !state.ui.value.searchLoading && state.ui.value.searchResults.tracks.isNotEmpty() }
+            val tracks = state.ui.value.searchResults.tracks
+            val chosen = tracks.firstOrNull { "judy" in it.artistLine.lowercase() } ?: tracks.first()
+            state.play(chosen, PlaybackOrigin.SEARCH, tracks)
+            waitFor(10_000) { state.playback.value.track != null }
+            waitFor(10_000) { tui.art.get(chosen.artworkUrl) != null }
+            player.frames.value = spectrum(1.0)
+            state.setVolumeBoostPercent(400)
+            val themes = listOf(
+                ThemePreset.NOCTORIUM_NIGHT to "night",
+                ThemePreset.CATPPUCCIN_LATTE to "latte",
+                ThemePreset.WINDOWS_98 to "98",
+                ThemePreset.WINDOWS_98_NOCTORIUM to "noctorium-98",
+                ThemePreset.WINDOWS_XP to "xp",
+            )
+            for ((theme, name) in themes) {
+                state.setTheme(theme)
+                state.setProgressBarStyle(ProgressBarStyle.SLIDER)
+                state.setVisualiser(VisualiserStyle.BARS)
+                tui.preferences.playerBar = TuiPlayerBar.TOOLBAR
+                tui.page = Page.QUEUE
+                write(folder, "toolbar-$name", tui)
+                write(folder, "toolbar-$name-narrow", tui, 84, 24)
+                tui.preferences.nowPlaying = TuiNowPlaying.PLAYLIST
+                tui.page = Page.NOW_PLAYING
+                write(folder, "playlist-$name", tui)
+                write(folder, "playlist-$name-narrow", tui, 96, 30)
+                state.setVisualiser(VisualiserStyle.LEVEL_METER)
+                write(folder, "playlist-$name-meter", tui)
+                state.setVisualiser(VisualiserStyle.BARS)
+                tui.preferences.playerBar = TuiPlayerBar.FULL
+                write(folder, "playlist-$name-full-bar", tui)
+                tui.page = Page.QUEUE
+                write(folder, "bar-full-boost-$name", tui)
+                tui.preferences.playerBar = TuiPlayerBar.TASKBAR
+                write(folder, "bar-taskbar-boost-$name", tui)
+                tui.preferences.playerBar = TuiPlayerBar.FULL
+                tui.overlays.addLast(VolumePanel(booster = true))
+                write(folder, "volume-$name", tui)
+                tui.overlays.clear()
+                tui.page = Page.SETTINGS
+                tui.settingsQuery = null
+                write(folder, "settings-$name", tui)
+                tui.settingsQuery = "dark mode"
+                tui.settingsSearchFocused = true
+                write(folder, "settings-search-$name", tui)
+                SettingsIndex.close(tui)
+                tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
+            }
+
+            // 256 colours: the Toolbar and the Playlist layout, dark and in Noctorium 98.
+            for ((theme, name) in listOf(ThemePreset.NOCTORIUM_NIGHT to "night", ThemePreset.WINDOWS_98_NOCTORIUM to "noctorium-98")) {
+                state.setTheme(theme)
+                tui.preferences.playerBar = TuiPlayerBar.TOOLBAR
+                tui.preferences.nowPlaying = TuiNowPlaying.PLAYLIST
+                tui.page = Page.NOW_PLAYING
+                write(folder, "playlist-$name-256", tui, colours256 = true)
+                tui.page = Page.QUEUE
+                write(folder, "toolbar-$name-256", tui, colours256 = true)
+            }
+            tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
+
+            // The symbols, on the toolbar, the full bar and the sidebar.
+            state.setTheme(ThemePreset.NOCTORIUM_NIGHT)
+            for (glyphs in listOf(TuiGlyphs.ASCII, TuiGlyphs.NERD_FONT)) {
+                tui.preferences.glyphs = glyphs
+                tui.page = Page.QUEUE
+                tui.preferences.playerBar = TuiPlayerBar.TOOLBAR
+                write(folder, "glyphs-${glyphs.name.lowercase()}-toolbar", tui)
+                tui.preferences.playerBar = TuiPlayerBar.FULL
+                write(folder, "glyphs-${glyphs.name.lowercase()}-full", tui)
+                tui.preferences.nowPlaying = TuiNowPlaying.PLAYLIST
+                tui.page = Page.NOW_PLAYING
+                write(folder, "glyphs-${glyphs.name.lowercase()}-playlist", tui)
+                tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
+            }
+            tui.preferences.glyphs = TuiGlyphs.STANDARD
+
+            // Where the music is out of the booster's reach, and stop after this song on the bars.
+            player.mutable.update { it.copy(volumeBoostAvailable = false) }
+            waitFor(5_000) { !state.playback.value.volumeBoostAvailable }
+            tui.overlays.addLast(VolumePanel(booster = true))
+            write(folder, "volume-unavailable", tui)
+            tui.overlays.clear()
+            player.mutable.update { it.copy(volumeBoostAvailable = true) }
+            state.setStopAfterCurrent(true)
+            tui.page = Page.QUEUE
+            write(folder, "queue-stop-after", tui)
+            tui.preferences.playerBar = TuiPlayerBar.TOOLBAR
+            write(folder, "toolbar-stop-after", tui)
+            state.setStopAfterCurrent(false)
+            // The search's bang.
+            tui.page = Page.SEARCH
+            tui.searchText = "!sc amazing grace"
+            state.search(tui.searchText)
+            waitFor(20_000) { !state.ui.value.searchLoading }
+            write(folder, "search-bang", tui)
+        } finally {
+            tui.preferences.glyphs = TuiGlyphs.STANDARD
+            tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
+            tui.preferences.playerBar = TuiPlayerBar.FULL
+            state.setVolumeBoostPercent(100)
+            state.setAutoplay(true)
+            state.setTheme(ThemePreset.NOCTORIUM_NIGHT)
+            state.setProgressBarStyle(ProgressBarStyle.MINIMAL)
+            state.setVisualiser(VisualiserStyle.BARS)
+            state.close()
+        }
+    }
+
+    /**
+     * The visualiser drawn from a real mpv measuring real sound, with nothing to hear: mpv plays to its null output
+     * a sweep from the bass up over pink noise, made by ffmpeg, and the Playlist layout is drawn as it plays. Needs
+     * `-Dnoctorium.live=true` as well, ffmpeg on the path, and mpv where `-Dnoctorium.mpv` says or on the path.
+     */
+    @Test
+    fun `the visualiser draws what mpv measures`() {
+        val folder = folder ?: return
+        if (System.getProperty("noctorium.live") != "true") return
+        val mpv = System.getProperty("noctorium.mpv")?.let(Path::of) ?: app.noctorium.playback.BackendLocator.mpv() ?: return
+        val sound = Files.createTempFile("noctorium-sweep", ".ogg")
+        val made = ProcessBuilder(
+            "ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "anoisesrc=color=pink:amplitude=0.08:duration=40",
+            "-f", "lavfi", "-i", "aevalsrc=0.5*sin(2*PI*40*pow(2\\,t/4)*t):s=48000:d=40",
+            "-filter_complex", "amix=inputs=2:normalize=0,aformat=channel_layouts=stereo", "-c:a", "libvorbis", sound.toString(),
+        ).redirectErrorStream(true).start().waitFor()
+        check(made == 0) { "ffmpeg could not make the sweep" }
+        val parts = CliParts()
+        val engine = MpvPlaybackEngine(parts.backend, executable = { mpv }, downloadedFile = { sound }, audioOutput = "null")
+        val state = cliAppState(parts, engine)
+        val tui = Tui(state, parts, web = null)
+        val track = Track(
+            provider = app.noctorium.domain.ProviderType.YOUTUBE_MUSIC, id = "sweep", title = "A sweep over pink noise",
+            artists = listOf(app.noctorium.domain.Artist("ffmpeg", "ffmpeg", app.noctorium.domain.ProviderType.YOUTUBE_MUSIC)),
+            durationMs = 40_000, sourceUrl = "https://music.youtube.com/watch?v=sweep",
+        )
+        try {
+            state.setTheme(ThemePreset.NOCTORIUM_NIGHT)
+            state.setVisualiser(VisualiserStyle.BARS)
+            tui.preferences.nowPlaying = TuiNowPlaying.PLAYLIST
+            tui.preferences.playerBar = TuiPlayerBar.TOOLBAR
+            tui.page = Page.NOW_PLAYING
+            state.play(track, PlaybackOrigin.SEARCH, listOf(track))
+            waitFor(15_000) { state.playback.value.status == PlaybackStatus.PLAYING }
+            tui.frame(150, 42)
+            waitFor(10_000) { tui.analysis?.bands?.isNotEmpty() == true }
+            for (second in listOf(3, 9, 15)) {
+                waitFor(20_000) { state.playback.value.positionMs >= second * 1_000L }
+                write(folder, "live-bars-${second}s", tui)
+            }
+            state.setVisualiser(VisualiserStyle.LEVEL_METER)
+            Thread.sleep(1_500)
+            write(folder, "live-meter", tui)
+            state.setTheme(ThemePreset.WINDOWS_98)
+            state.setVisualiser(VisualiserStyle.BARS)
+            Thread.sleep(1_500)
+            write(folder, "live-bars-98", tui)
+        } finally {
+            tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
+            tui.preferences.playerBar = TuiPlayerBar.FULL
+            state.setTheme(ThemePreset.NOCTORIUM_NIGHT)
+            state.close()
+            Files.deleteIfExists(sound)
         }
     }
 

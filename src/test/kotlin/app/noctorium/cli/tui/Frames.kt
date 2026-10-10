@@ -41,6 +41,7 @@ object Frames {
         val bold = plain.deriveFont(Font.BOLD)
         val fallback = Font("Segoe UI Symbol", Font.PLAIN, 14)
         val cjk = Font("MS Gothic", Font.PLAIN, 14)
+        val icons = Font("Segoe MDL2 Assets", Font.PLAIN, 13).takeIf { it.family != Font.DIALOG }
         fun colour(c: Rgb, d: Int) = Color(if (c == DEFAULT) d else c)
         for (y in 0 until canvas.height) for (x in 0 until canvas.width) {
             val i = y * canvas.width + x
@@ -54,7 +55,12 @@ object Frames {
             g.fillRect(x * CELL_W, y * CELL_H, w, CELL_H)
             if (t == " ") continue
             g.color = fg
-            if (!block(g, t, x * CELL_W, y * CELL_H, w)) {
+            val standIn = NERD_STAND_INS[t.codePointAt(0)]
+            if (standIn != null && icons != null && t.codePointCount(0, t.length) == 1) {
+                // A Nerd Font's icon, which no font here has: Windows' own icon of the same thing stands in for it.
+                g.font = icons
+                g.drawString(String(Character.toChars(standIn)), x * CELL_W - 1, y * CELL_H + 14)
+            } else if (!block(g, t, x * CELL_W, y * CELL_H, w)) {
                 var font = if (canvas.style[i] and BOLD != 0) bold else plain
                 if (font.canDisplayUpTo(t) != -1) font = if (cjk.canDisplayUpTo(t) == -1) cjk else fallback
                 g.font = font
@@ -65,6 +71,17 @@ object Frames {
         g.dispose()
         return image
     }
+
+    /**
+     * The Nerd Font icons the terminal's Nerd Font symbols use, and the Segoe MDL2 Assets icon of the same thing, which
+     * Windows has: the picture draws these where a terminal with a Nerd Font would draw its own.
+     */
+    private val NERD_STAND_INS = mapOf(
+        0xF048 to 0xE892, 0xF04B to 0xE768, 0xF04C to 0xE769, 0xF04D to 0xE71A, 0xF051 to 0xE893, 0xF074 to 0xE8B1,
+        0xF01E to 0xE8EE, 0xF067 to 0xE710, 0xF004 to 0xEB52, 0xF08A to 0xEB51, 0xF028 to 0xE767, 0xF186 to 0xE708,
+        0xF002 to 0xE721, 0xF015 to 0xE80F, 0xF001 to 0xE8D6, 0xF03A to 0xE8FD, 0xF144 to 0xE768, 0xF019 to 0xE896,
+        0xF0EC to 0xE8AB, 0xF013 to 0xE713, 0xF110 to 0xE895,
+    )
 
     /** Draws [t] as the block it is, if it is one. */
     private fun block(g: Graphics2D, t: String, x: Int, y: Int, w: Int): Boolean {
