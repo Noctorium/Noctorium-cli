@@ -25,20 +25,28 @@ noctorium web                   the web player, for any browser on your network
 - **Every service in one place.** Home, search and your library from YouTube Music, SoundCloud, Bandcamp,
   Spotify and VK, one queue for all of it. Spotify's songs play matched on YouTube Music, or with Premium
   in your own Spotify app, wherever it is open.
-- **Made yours.** The speed, from half to double; carrying on with similar songs when the queue runs out;
-  which services a search of all of them asks; a sleep timer that fades out; and every key.
+- **Made yours.** The speed, from half to double; a volume booster up to 1000%, always behind a limiter, so it
+  gets loud rather than broken; carrying on with similar songs when the queue runs out, or from a song picked on
+  Home; which services a search of all of them asks, or one service with a bang (`!ytm`, `!sc`, `!sp`, `!bc`,
+  `!vk`, `!all`); a sleep timer that fades out, or stop after this song; and every key. Settings is in sections,
+  with a search (`/` there) that finds a setting by its name or another word for it — "dark mode", "louder".
 - **A queue that keeps.** What autoplay will carry on with is shown under the queue, from the last song's own
-  service or YouTube Music's radio, to play, keep or drop. What is next can be shuffled or cleared, the queue
-  saved as a playlist, and it is still there, where it was left, the next time the player starts.
+  service or YouTube Music's radio, to play, keep or drop. What is next can be shuffled or cleared, everything but
+  the song playing cleared, the queue saved as a playlist, and it is still there, where it was left, the next
+  time the player starts.
 - **Your real accounts.** Likes go to the service; playlists are made, renamed, reordered, made public or
   private and deleted there.
 - **Synced lyrics** from eight sources, lit up line by line as they are sung, with the source switched
   right on the lyrics (`[` and `]`).
 - **Covers in the terminal**, drawn in half blocks, and all of Noctorium's twenty themes — the Windows 98,
   Noctorium 98 and XP ones drawn as themselves, title bars, bevels, taskbar and all — the seek bar in each of
-  its eleven styles, and the accent taken from the cover if you like. The player bar is full, one compact row or a
-  taskbar; Now playing is the cover beside the lyrics, a poster in big type, the cover alone or the lyrics
-  large.
+  its twelve styles, and the accent taken from the cover if you like. The player bar is full, one compact row, a
+  taskbar or a desktop music player's toolbar (add, previous, play, pause, stop, next, a slider, repeat, shuffle
+  and the volume); Now playing is the cover beside the lyrics, a poster in big type, the cover alone, the lyrics
+  large, or a playlist window — the cover in a panel, the queue as a table with the columns you choose, a
+  visualiser drawn from what mpv measures of the sound itself, and a status bar with the codec, the bitrate and
+  how far into the queue. The symbols are the terminal's own, plain ASCII, or a Nerd Font's icons (Font Awesome's,
+  as Nerd Fonts patch them in; Noctorium ships no font, it only names their code points).
 - **Scrobbling** to Last.fm and ListenBrainz, Discord presence, downloads to keep, a sleep timer,
   Noctorium Connect to move the music to another device.
 - **The web player.** `noctorium web`, or `w` inside the player, serves Noctorium to the browsers on your
@@ -126,12 +134,14 @@ As they come; Settings › Keys changes any of them, and `?` always lists them a
 | `/` | Search every service (or paste a link) |
 | `↑` `↓` `Enter` | Choose, and play from there |
 | `Space` `n` `p` | Play or pause, next, previous |
+| `v` `.` | Stop, back at the start of the song; stop after this song |
 | `←` `→` | Back or on five seconds (thirty with Shift) |
 | `+` `-` `m` | Volume, mute |
+| `b` | The volume and the booster, up to 1000% |
 | `<` `>` | Slower, faster |
 | `s` `r` | Shuffle, repeat |
 | `a` `A` `P` | Add to the queue, play next, add to a playlist |
-| `S` `U` `N` | On the Queue page: shuffle what is next, clear it, save the queue as a playlist |
+| `S` `U` `N` `O` | On the Queue page: shuffle what is next, clear it, save the queue as a playlist, clear all but this song |
 | `a` `x` `R` | On autoplay's songs under the queue: keep one, drop one, look again |
 | `l` `d` | Like on the real account, download to keep |
 | `t` | The next theme |
