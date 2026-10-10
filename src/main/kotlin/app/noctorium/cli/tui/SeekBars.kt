@@ -8,14 +8,15 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
- * The seek bar, in whichever of the eleven styles is chosen -- one setting across every Noctorium -- in the
+ * The seek bar, in whichever of the twelve styles is chosen -- one setting across every Noctorium -- in the
  * nearest a row of cells gets: a hairline with a dot, the wave travelling while the music does, segments, a
- * capsule, Windows' blocks, a song's own row of bars, beads, a neon line, a ruler, and XP's green blocks.
+ * capsule, Windows' blocks, a song's own row of bars, beads, a neon line, a ruler, XP's green blocks, and a
+ * desktop music player's slider.
  *
  * One row each, so it fits wherever a seek bar goes. Where the row above or below is free the ruler hangs its
  * pointer there and the Windows handles stand taller than their track, as theirs did. The Windows themes draw
- * the plain slider and the classic bar as their own trackbar and progress bar; every other theme draws each
- * style the same.
+ * the plain slider and the Slider as their own trackbar, and the classic bar as their progress bar; every other
+ * theme draws each style the same.
  */
 object SeekBars {
     /** The eight heights a cell can be filled to from its foot. */
@@ -45,9 +46,9 @@ object SeekBars {
         val head = (fraction * (w - 1)).toInt().coerceIn(0, w - 1)
         val unplayed = p.line
         when {
-            p.skin == ThemeSkin.WINDOWS_98 && style == ProgressBarStyle.MATERIAL -> trackbar98(canvas, p.w98, x, y, w, head, bg, roomAbove, roomBelow)
+            p.skin == ThemeSkin.WINDOWS_98 && style in TRACKBARS -> trackbar98(canvas, p.w98, x, y, w, head, bg, roomAbove, roomBelow)
             p.skin == ThemeSkin.WINDOWS_98 && style == ProgressBarStyle.CLASSIC -> progress98(canvas, p.w98, x, y, w, head, bg, roomAbove, roomBelow)
-            p.skin == ThemeSkin.WINDOWS_XP && style == ProgressBarStyle.MATERIAL -> trackbarXp(canvas, x, y, w, head, bg, roomAbove)
+            p.skin == ThemeSkin.WINDOWS_XP && style in TRACKBARS -> trackbarXp(canvas, x, y, w, head, bg, roomAbove)
             else -> when (style) {
                 ProgressBarStyle.MINIMAL, ProgressBarStyle.MATERIAL -> {
                     for (i in 0 until w) canvas.set(x + i, y, if (i < head) "━" else "─", if (i < head) p.accent else unplayed, bg)
@@ -86,8 +87,30 @@ object SeekBars {
                 ProgressBarStyle.NEON -> neon(canvas, p, x, y, w, head, bg)
                 ProgressBarStyle.RULER -> ruler(canvas, p, x, y, w, head, bg, durationMs, roomAbove)
                 ProgressBarStyle.LUNA -> luna(canvas, x, y, w, head, bg, roomAbove)
+                ProgressBarStyle.SLIDER -> slider(canvas, p, x, y, w, head, bg)
             }
         }
+    }
+
+    /** The styles a Windows skin draws as its own trackbar: a slider is a slider, whoever drew it. */
+    private val TRACKBARS = setOf(ProgressBarStyle.MATERIAL, ProgressBarStyle.SLIDER)
+
+    /**
+     * A desktop music player's slider: a groove with rounded ends -- heavier than the hairline's, so it reads as a
+     * channel -- the accent along it as far as the song has played, and a small round handle in the light of
+     * the text rather than the accent, as a desktop's own sliders have it.
+     */
+    private fun slider(canvas: Canvas, p: Palette, x: Int, y: Int, w: Int, head: Int, bg: Rgb) {
+        val groove = if (p.light) mix(p.line, 0, .08f) else mix(p.line, p.panel.takeIf { it != DEFAULT } ?: 0, .25f)
+        for (i in 0 until w) {
+            val glyph = when (i) {
+                0 -> "╺"
+                w - 1 -> "╸"
+                else -> "━"
+            }
+            canvas.set(x + i, y, glyph, if (i < head) p.accent else groove, bg)
+        }
+        canvas.set(x + head, y, "●", if (p.light) mix(p.text, p.accent, .35f) else p.text, bg, BOLD)
     }
 
     /** The colour the place the song has reached is picked out in: the accent, brighter. */
