@@ -5,6 +5,7 @@ import app.noctorium.cli.TerminalBridge
 import app.noctorium.cli.tui.WebSwitch
 import app.noctorium.cli.update.CliUpdates
 import app.noctorium.core.AppState
+import app.noctorium.playback.AudioAnalysis
 import app.noctorium.playback.MpvPlaybackEngine
 import app.noctorium.settings.AppDirectories
 import com.google.zxing.BarcodeFormat
@@ -41,12 +42,16 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -60,6 +65,7 @@ import java.nio.file.Files
 import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
+import kotlin.math.roundToInt
 import kotlin.time.Duration.Companion.seconds
 
 /**
@@ -115,6 +121,10 @@ class WebPlayer(
         val dirty = ConcurrentHashMap.newKeySet<String>()
         val signal = Channel<Unit>(Channel.CONFLATED)
         val sent = ConcurrentHashMap<String, String>()
+
+        /** Whether this page shows a visualiser fed by the computer's player, and wants its frames. */
+        @Volatile
+        var watchesAnalysis = false
 
         fun send(text: String): Boolean = session.outgoing.trySend(Frame.Text(text)).isSuccess
 
@@ -174,6 +184,9 @@ class WebPlayer(
         state.playback.marks("playback")
         player.output.marks("playback")
         state.sleepTimer.marks("playback")
+        state.stopAfterCurrent.marks("playback")
+        // The booster's level is the one chosen, which Spotify's player, having none, does not repeat.
+        state.settings.map { it.preferences.volumeBoostPercent }.distinctUntilChanged().marks("playback")
         state.queue.state.marks("queue")
         // The queue's part says what autoplay is doing, which depends on the setting as well as on the queue.
         state.settings.map { it.preferences.autoplay }.distinctUntilChanged().marks("queue")
@@ -196,6 +209,19 @@ class WebPlayer(
                     ?.let(player.browser::prefetch)
             }
         }
+        // The visualiser's frames from the computer's player, to the pages showing one, and measured only while any is.
+        scope.launch {
+            analysisWatched.collectLatest { watched ->
+                if (!watched) return@collectLatest
+                var last: String? = null
+                state.audioAnalysis.collect { frame ->
+                    val text = analysisMessage(frame)
+                    if (text == last) return@collect
+                    last = text
+                    connections.forEach { if (it.watchesAnalysis) it.send(text) }
+                }
+            }
+        }
         // Messages core wants shown, passed to every page as a passing notice.
         scope.launch { state.likes.collect { it.message?.let { m -> notice(m) } } }
         scope.launch { state.library.collect { it.notice?.let { m -> notice(m) } } }
@@ -213,6 +239,24 @@ class WebPlayer(
     }
 
     private val recentNotices = ConcurrentHashMap<String, Long>()
+
+    /** Whether any page wants the visualiser's frames. */
+    private val analysisWatched = MutableStateFlow(false)
+
+    private fun rewatch() {
+        analysisWatched.value = connections.any { it.watchesAnalysis }
+    }
+
+    /** One frame for the pages: every value 0 to 1 to three places, and empty lists for a moment with nothing to show. */
+    private fun analysisMessage(frame: AudioAnalysis?): String {
+        fun List<Float>.wire() = JsonArray(map { JsonPrimitive((it * 1000).roundToInt() / 1000.0) })
+        return buildJsonObject {
+            put("kind", "analysis")
+            put("bands", frame?.bands.orEmpty().wire())
+            put("peaks", frame?.peaks.orEmpty().wire())
+            put("rms", frame?.rms.orEmpty().wire())
+        }.toString()
+    }
 
     /** Something every open page should show in passing: `good`, `bad`, or `normal`. */
     fun announce(text: String, tone: String = "normal") = notice(text, tone)
@@ -305,6 +349,7 @@ class WebPlayer(
                 } finally {
                     pusher.cancel()
                     connections -= connection
+                    rewatch()
                     if (sinkOwner == connection) {
                         sinkOwner = null
                         player.browser.sink = null
@@ -338,12 +383,30 @@ class WebPlayer(
                 val type = command["type"]?.jsonPrimitive?.contentOrNull
                 if (player.output.value == Output.BROWSER && type in starts) claim(connection)
                 if (type == "output" && command["to"]?.jsonPrimitive?.contentOrNull == "browser") claim(connection)
-                val problem = runCatching { commands.run(command) }.getOrElse { it.message ?: "That did not work" }
+                val problem = if (type == "analysis") {
+                    // Said by the page while it shows a visualiser fed by the computer, and NONE when it stops: it is
+                    // this page's, so it is kept here rather than in core.
+                    connection.watchesAnalysis = (command["kind"]?.jsonPrimitive?.contentOrNull ?: "NONE") != "NONE"
+                    rewatch()
+                    null
+                } else {
+                    runCatching { commands.run(command) }.getOrElse { it.message ?: "That did not work" }
+                }
                 connection.send(buildJsonObject { put("kind", "reply"); put("id", id); problem?.let { put("error", it) } }.toString())
             }
             "claim" -> claim(connection)
             "audio" -> {
                 if (connection != sinkOwner) return
+                if (message["event"]?.jsonPrimitive?.contentOrNull == "format") {
+                    player.browser.reportFormat(
+                        load = message["generation"]?.jsonPrimitive?.intOrNull ?: -1,
+                        codec = message["codec"]?.jsonPrimitive?.contentOrNull,
+                        bitsPerSecond = message["bitsPerSecond"]?.jsonPrimitive?.intOrNull,
+                        sampleRateHz = message["sampleRateHz"]?.jsonPrimitive?.intOrNull,
+                        channels = message["channels"]?.jsonPrimitive?.intOrNull,
+                    )
+                    return
+                }
                 player.browser.report(
                     event = message["event"]?.jsonPrimitive?.contentOrNull ?: return,
                     load = message["generation"]?.jsonPrimitive?.intOrNull ?: -1,

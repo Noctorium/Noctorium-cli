@@ -12,13 +12,19 @@ import app.noctorium.domain.Playlist
 import app.noctorium.domain.ProviderType
 import app.noctorium.domain.Track
 import app.noctorium.domain.editableOnService
+import app.noctorium.playback.AudioAnalysisKind
 import app.noctorium.playback.SleepTimerState
+import app.noctorium.playback.VolumeBoost
 import app.noctorium.playlists.LocalPlaylist
 import app.noctorium.settings.AutoplaySource
 import app.noctorium.settings.DEFAULT_HYBRID_SEARCH
+import app.noctorium.settings.HomePlay
+import app.noctorium.settings.IconSet
 import app.noctorium.settings.ProgressBarStyle
+import app.noctorium.settings.QueueColumn
 import app.noctorium.settings.ThemePreset
 import app.noctorium.settings.ThemeSkin
+import app.noctorium.settings.VisualiserStyle
 import app.noctorium.settings.Windows98Palette
 import app.noctorium.settings.resolvedAccent
 import app.noctorium.settings.themeColours
@@ -115,6 +121,23 @@ data class WPlayback(
     val sleep: WSleep,
     /** A Spotify song the account's own Spotify app is playing: the sound is there, not here or in a tab. */
     val onSpotify: Boolean = false,
+    /**
+     * The volume booster's level as chosen, 100 (off) to 1000: the level in force wherever [volumeBoostAvailable]
+     * says there is a booster, and the one that comes back when the music returns from where there is none.
+     * [boost] says whether it is on where the music is now.
+     */
+    val volumeBoostPercent: Int = VolumeBoost.OFF_PERCENT,
+    /** False where the sound is made out of Noctorium's reach -- Spotify playing in Spotify's own app. */
+    val volumeBoostAvailable: Boolean = true,
+    /** "Opus, stereo, 48 kHz, 128 kbit/s": as much as is known of what is playing. Absent when nothing is. */
+    val format: String? = null,
+    /** Stop after this song: when it ends nothing more plays, and the queue waits on the next. It clears itself. */
+    val stopAfterCurrent: Boolean = false,
+    /**
+     * What the computer's player can measure for a visualiser now, by AudioAnalysisKind's name: SPECTRUM, LEVELS
+     * or NONE. Only the computer's: with the output a browser this is NONE, and the page measures its own audio.
+     */
+    val analysisKind: String = AudioAnalysisKind.NONE.name,
     val at: Long = System.currentTimeMillis(),
 )
 
@@ -140,6 +163,10 @@ data class WQueue(
     /** Whether next would go anywhere: on in the queue, round again, autoplay's first, or Spotify's choice. */
     val hasNext: Boolean = false,
     val autoplay: String = "off",
+    /** The whole queue's length, every song whose length is known: the "1:03:41" of a status bar's "2:31 / 1:03:41". */
+    val durationMs: Long = 0,
+    /** The lengths of the songs before the current one, for the page to add its own position to as the song moves. */
+    val elapsedBeforeMs: Long = 0,
 )
 
 /** One of a setting's choices, with what it means. */
@@ -161,6 +188,10 @@ data class WSearch(
     val playlists: List<WPlaylist>,
     val albums: List<WAlbum>,
     val artists: List<WArtist>,
+    /** The bang in what was typed, as typed -- "!sc" -- which sends it to one service whatever [mode] says. Absent for none. */
+    val searchBang: String? = null,
+    /** Where the results shown are from, by SearchMode's name: the bang's service, or [mode] without one. */
+    val activeSearchMode: String = mode,
 )
 
 @Serializable
@@ -366,6 +397,20 @@ data class WSettings(
     val hybridServices: List<String>,
     /** Seconds a sleep timer fades out over; zero for none. */
     val sleepFade: Int,
+    /** The visualiser, by VisualiserStyle's name -- Bars, Level meter or Off -- and the choices. Shared with the terminal. */
+    val visualiser: String = VisualiserStyle.BARS.name,
+    val visualiserStyles: List<WChoice> = emptyList(),
+    /** The queue table's columns by QueueColumn's name, in order, Title always among them; and every column, its heading as the description. */
+    val queueColumns: List<String> = emptyList(),
+    val allQueueColumns: List<WChoice> = emptyList(),
+    /** The status bar along the foot of the Playlist layout. */
+    val statusBar: Boolean = true,
+    /** The icons, by IconSet's name, and the choices. STANDARD is the page's own icons, as they have always been. */
+    val iconSet: String = IconSet.STANDARD.name,
+    val iconSets: List<WChoice> = emptyList(),
+    /** What a song played from Home plays after it, by HomePlay's name, and the choices. */
+    val homePlay: String = HomePlay.AUTOPLAY.name,
+    val homePlays: List<WChoice> = emptyList(),
     val lastfm: WService,
     val listenbrainz: WService,
     val scrobbles: Int,
@@ -439,6 +484,13 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
             WPlayback(
                 p.status.name.lowercase(), p.track?.wire(), p.errorMessage, p.volume, p.positionMs, p.durationMs,
                 p.isMuted, p.volumeBoostEnabled, engine.output.value.name.lowercase(), sleep, onSpotify,
+                // The level chosen rather than the player's: Spotify's app has none, and the level is still the
+                // listener's, to come back when the music does.
+                volumeBoostPercent = VolumeBoost.clamp(state.settings.value.preferences.volumeBoostPercent),
+                volumeBoostAvailable = p.volumeBoostAvailable,
+                format = p.format?.describe(),
+                stopAfterCurrent = state.stopAfterCurrent.value,
+                analysisKind = (if (engine.output.value == Output.BROWSER) AudioAnalysisKind.NONE else state.audioAnalysisKind).name,
             ),
         )
     }
@@ -453,6 +505,8 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
                 continuesElsewhere = q.continuesElsewhere,
                 hasNext = q.hasNext,
                 autoplay = AutoplayState.of(q, state.settings.value.preferences.autoplay).name.lowercase(),
+                durationMs = q.durationMs,
+                elapsedBeforeMs = q.elapsedMs(0),
             ),
         )
     }
@@ -478,7 +532,12 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
         val ui = state.ui.value
         val r = ui.searchResults
         return wireJson.encodeToJsonElement(
-            WSearch(ui.searchQuery, ui.searchMode.name, ui.searchLoading, r.tracks.map { it.wire() }, r.playlists.map { it.wire() }, r.albums.map { it.wire() }, r.artists.map { it.wire() }),
+            WSearch(
+                ui.searchQuery, ui.searchMode.name, ui.searchLoading,
+                r.tracks.map { it.wire() }, r.playlists.map { it.wire() }, r.albums.map { it.wire() }, r.artists.map { it.wire() },
+                searchBang = ui.searchBang?.typed,
+                activeSearchMode = ui.activeSearchMode.name,
+            ),
         )
     }
 
@@ -578,6 +637,15 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
                 hybridSearch = DEFAULT_HYBRID_SEARCH.filter { it in p.hybridSearch }.map { it.name },
                 hybridServices = DEFAULT_HYBRID_SEARCH.map { it.name },
                 sleepFade = p.sleepFadeSeconds,
+                visualiser = p.visualiser.name,
+                visualiserStyles = VisualiserStyle.entries.map { WChoice(it.name, it.displayName, it.description) },
+                queueColumns = QueueColumn.normalised(p.queueColumns).map { it.name },
+                allQueueColumns = QueueColumn.entries.map { WChoice(it.name, it.displayName, it.heading) },
+                statusBar = p.statusBar,
+                iconSet = p.iconSet.name,
+                iconSets = IconSet.entries.map { WChoice(it.name, it.displayName, it.description) },
+                homePlay = p.homePlay.name,
+                homePlays = HomePlay.entries.map { WChoice(it.name, it.displayName, it.description) },
                 bandcamp = WBandcamp(
                     username = p.bandcampUsername,
                     fanName = s.bandcamp.fanName,

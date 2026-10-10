@@ -15,9 +15,14 @@ import app.noctorium.lyrics.LyricsProviderId
 import app.noctorium.playback.RepeatMode
 import app.noctorium.settings.AccentPreset
 import app.noctorium.settings.AutoplaySource
+import app.noctorium.settings.HomePlay
+import app.noctorium.settings.IconSet
 import app.noctorium.settings.ProgressBarStyle
+import app.noctorium.settings.QueueColumn
 import app.noctorium.settings.ThemePreset
 import app.noctorium.settings.TimeDisplay
+import app.noctorium.settings.VisualiserStyle
+import app.noctorium.playback.VolumeBoost
 import app.noctorium.social.YouTubeChannel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -57,7 +62,13 @@ class WebCommands(
             "seek" -> state.seekTo(command.long("positionMs") ?: return "No position")
             "volume" -> state.setVolume(command.float("value") ?: return "No volume")
             "mute" -> state.toggleMute()
+            // The boost button: off when on, back to the last level when off.
             "boost" -> state.toggleVolumeBoost()
+            // The booster's slider, 100 (off) to 1000, in tens.
+            "boostPercent" -> state.setVolumeBoostPercent(VolumeBoost.snap(command.float("percent") ?: return "No level"))
+            // Back to the start of the song, paused, the queue as it was.
+            "stop" -> state.stop()
+            "stopAfterCurrent" -> command.bool("on")?.let(state::setStopAfterCurrent) ?: state.toggleStopAfterCurrent()
             "shuffle" -> state.toggleShuffle()
             "repeat" -> state.cycleRepeat()
             "setRepeat" -> state.queue.setRepeat(RepeatMode.valueOf(command.string("mode")?.uppercase() ?: return "No mode"))
@@ -69,7 +80,8 @@ class WebCommands(
                 val track = command.track("track") ?: return "No track"
                 val list = command.tracks("list").ifEmpty { listOf(track) }
                 val origin = command.string("origin")?.let { runCatching { PlaybackOrigin.valueOf(it.uppercase()) }.getOrNull() } ?: PlaybackOrigin.SEARCH
-                state.play(track, origin, list)
+                // A song picked on Home plays the way the listener chose: autoplay after it, or the rest of its shelf.
+                if (origin == PlaybackOrigin.HOME) state.playFromHome(track, list) else state.play(track, origin, list)
             }
             "playPlaylist" -> {
                 val playlist = playlist(command.string("key")) ?: return "That playlist is not open any more"
@@ -95,6 +107,8 @@ class WebCommands(
             "clearQueue" -> state.clearQueue()
             "shuffleUpcoming" -> state.shuffleUpcoming()
             "clearUpcoming" -> state.clearUpcoming()
+            // The queue becomes the song playing, alone; it plays on.
+            "clearAllButCurrent" -> state.clearAllButCurrent()
             // Core says how it went, saved or why not, as a library notice.
             "saveQueue" -> state.saveQueueAsPlaylist(command.string("title")?.takeIf(String::isNotBlank) ?: return "Give the playlist a name first")
             // Autoplay's songs, by key where the page sends one, so a list that moved on since it was drawn
@@ -209,6 +223,13 @@ class WebCommands(
             "accent" -> state.setAccent(AccentPreset.valueOf(command.string("name") ?: return "No accent"))
             "seekBar" -> state.setProgressBarStyle(ProgressBarStyle.valueOf(command.string("name") ?: return "No style"))
             "taskbarClock" -> state.setTaskbarClock(command.bool("on") ?: return "On or off?")
+            "visualiser" -> state.setVisualiser(choice<VisualiserStyle>(command.string("name")) ?: return "No such visualiser")
+            "queueColumns" -> state.setQueueColumns(
+                (command.strings("columns") ?: return "No columns").mapNotNull { name -> choice<QueueColumn>(name) },
+            )
+            "statusBar" -> state.setStatusBar(command.bool("on") ?: return "On or off?")
+            "iconSet" -> state.setIconSet(choice<IconSet>(command.string("name")) ?: return "No such icons")
+            "homePlay" -> state.setHomePlay(choice<HomePlay>(command.string("name")) ?: return "No such choice")
             "timeDisplay" -> state.setTimeDisplay(TimeDisplay.valueOf(command.string("name") ?: return "No choice"))
             "skipNonMusic" -> state.setSkipNonMusic(command.bool("on") ?: return "On or off?")
             "youtubeHistory" -> state.setYouTubeHistory(command.bool("on") ?: return "On or off?")
@@ -353,6 +374,9 @@ class WebCommands(
         return ui.homeSections.asSequence().flatMap { it.playlists }.firstOrNull { it.playlistKey == key }
     }
 }
+
+/** One of [E]'s entries by its name, or null for a name this build does not have. */
+private inline fun <reified E : Enum<E>> choice(name: String?): E? = enumValues<E>().firstOrNull { it.name == name }
 
 /** The services whose playlists Noctorium makes and changes. */
 private val WRITABLE = setOf(ProviderType.YOUTUBE_MUSIC, ProviderType.YOUTUBE_VIDEO, ProviderType.SOUNDCLOUD)

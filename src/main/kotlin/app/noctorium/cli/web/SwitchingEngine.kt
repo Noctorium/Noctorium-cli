@@ -1,6 +1,8 @@
 package app.noctorium.cli.web
 
 import app.noctorium.domain.Track
+import app.noctorium.playback.AudioAnalysis
+import app.noctorium.playback.AudioAnalysisKind
 import app.noctorium.playback.PlaybackEngine
 import app.noctorium.playback.PlaybackState
 import app.noctorium.playback.PlaybackStatus
@@ -13,8 +15,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -45,6 +52,26 @@ class SwitchingEngine(
 
     private val current: PlaybackEngine get() = if (mutableOutput.value == Output.BROWSER) browser else computer
 
+    private val mutableAnalysis = MutableStateFlow<AudioAnalysis?>(null)
+
+    /**
+     * The visualiser's feed from whichever player has the music: mpv's measurements on the computer, and nothing
+     * from a browser, whose page measures what it plays itself. Asked of the player only while something here is
+     * collecting it, as core's own router does, so mpv measures only while a visualiser is on screen.
+     */
+    override val analysis: StateFlow<AudioAnalysis?> = mutableAnalysis.asStateFlow()
+    override val analysisKind: AudioAnalysisKind get() = current.analysisKind
+
+    init {
+        scope.launch {
+            combine(mutableOutput, mutableAnalysis.subscriptionCount.map { it > 0 }.distinctUntilChanged()) { output, watched ->
+                (if (output == Output.BROWSER) browser else computer).takeIf { watched }
+            }.collectLatest { engine ->
+                if (engine == null) mutableAnalysis.value = null else engine.analysis.collect { mutableAnalysis.value = it }
+            }
+        }
+    }
+
     suspend fun switchTo(target: Output) = switching.withLock {
         if (target == mutableOutput.value) return@withLock
         val from = current
@@ -52,7 +79,7 @@ class SwitchingEngine(
         val to = if (target == Output.BROWSER) browser else computer
         to.setVolume(snapshot.volume)
         to.setMuted(snapshot.isMuted)
-        to.setVolumeBoost(snapshot.volumeBoostEnabled)
+        to.setVolumeBoostPercent(snapshot.volumeBoostPercent)
         mutableOutput.value = target
         from.stop()
         val track = snapshot.track ?: return@withLock
@@ -70,6 +97,30 @@ class SwitchingEngine(
     override suspend fun setMuted(muted: Boolean) = current.setMuted(muted)
     override suspend fun seekTo(positionMs: Long) = current.seekTo(positionMs)
     override suspend fun stop() = current.stop()
+
+    /**
+     * Both are told, as with the equaliser: the booster is mpv's gain and limiter on the computer and the page's
+     * Web Audio in a browser, and each keeps the level for when the music moves to it.
+     */
+    override suspend fun setVolumeBoostPercent(percent: Int) {
+        computer.setVolumeBoostPercent(percent)
+        browser.setVolumeBoostPercent(percent)
+    }
+
+    /** Both are told how much the visualiser wants; each measures only while it is the one being watched. */
+    override suspend fun setAnalysis(wanted: AudioAnalysisKind) {
+        computer.setAnalysis(wanted)
+        browser.setAnalysis(wanted)
+    }
+
+    /**
+     * Both are told the speed, as they are the equaliser. Until this was here the terminal's speed setting reached
+     * nothing: core's default for an engine that does not take a speed is to ignore it.
+     */
+    override suspend fun setSpeed(speed: Float) {
+        computer.setSpeed(speed)
+        browser.setSpeed(speed)
+    }
 
     override suspend fun setLooping(enabled: Boolean) {
         computer.setLooping(enabled)

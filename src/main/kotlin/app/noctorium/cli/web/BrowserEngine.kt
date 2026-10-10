@@ -5,6 +5,8 @@ import app.noctorium.playback.BrowserStream
 import app.noctorium.playback.PlaybackEngine
 import app.noctorium.playback.PlaybackState
 import app.noctorium.playback.PlaybackStatus
+import app.noctorium.playback.StreamFormat
+import app.noctorium.playback.VolumeBoost
 import app.noctorium.playback.YtDlpService
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,9 +39,20 @@ class BrowserEngine(
     private val mutableState = MutableStateFlow(PlaybackState())
     override val state: StateFlow<PlaybackState> = mutableState.asStateFlow()
 
-    /** Sends a message to the browser that is playing; false when there is none. Set by the server. */
+    /**
+     * Sends a message to the browser that is playing; false when there is none. Set by the server. A page that
+     * becomes the speaker is told the booster's level at once, since it was set before there was a page to tell.
+     */
     @Volatile
     var sink: ((JsonObject) -> Boolean)? = null
+        set(value) {
+            field = value
+            if (value != null) send("boost") { put("percent", state.value.volumeBoostPercent) }
+        }
+
+    /** The level the boost button goes back to, as mpv keeps it: the last above 100%, 200% the first time. */
+    @Volatile
+    private var lastBoostOn = VolumeBoost.FIRST_PERCENT
 
     /** What each address handed to the browser stands for. */
     val streams = ConcurrentHashMap<String, Stream>()
@@ -85,7 +98,7 @@ class BrowserEngine(
     override suspend fun play(track: Track) {
         val load = ++generation
         mutableState.update {
-            it.copy(status = PlaybackStatus.RESOLVING, track = track, errorMessage = null, positionMs = 0, durationMs = track.durationMs ?: 0, loops = 0)
+            it.copy(status = PlaybackStatus.RESOLVING, track = track, errorMessage = null, positionMs = 0, durationMs = track.durationMs ?: 0, loops = 0, format = null)
         }
         val stream = runCatching {
             downloadedFile(track)?.let { Stream.Local(track, it) }
@@ -97,6 +110,7 @@ class BrowserEngine(
             return
         }
         if (load != generation) return
+        mutableState.update { it.copy(format = formatOf(stream)) }
         if (streams.size > 64) streams.clear()
         val token = UUID.randomUUID().toString().replace("-", "")
         streams[token] = stream
@@ -107,6 +121,8 @@ class BrowserEngine(
             put("volume", state.value.volume.toDouble())
             put("muted", state.value.isMuted)
             put("loop", looping)
+            // The page puts the booster in front of each song it loads, from this, as well as when told it changed.
+            put("boostPercent", state.value.volumeBoostPercent)
         }
         if (!sent) {
             mutableState.update {
@@ -136,9 +152,18 @@ class BrowserEngine(
         send("volume") { put("volume", value.toDouble()) }
     }
 
-    override suspend fun setVolumeBoost(enabled: Boolean) {
-        // A browser's volume stops at full; the boost is mpv's. Remembered so switching back keeps it.
-        mutableState.update { it.copy(volumeBoostEnabled = enabled) }
+    override suspend fun setVolumeBoost(enabled: Boolean) = setVolumeBoostPercent(if (enabled) lastBoostOn else VolumeBoost.OFF_PERCENT)
+
+    /**
+     * The booster in a browser: a browser's own volume stops at full, so the page puts Web Audio's gain and a
+     * limiter after its audio element and sets the gain from this. Every song reaches the page through this
+     * program's own address, so the page can always hear what it plays, and the booster is always there.
+     */
+    override suspend fun setVolumeBoostPercent(percent: Int) {
+        val level = VolumeBoost.clamp(percent)
+        if (VolumeBoost.isOn(level)) lastBoostOn = level
+        mutableState.update { it.copy(volumeBoostPercent = level, volumeBoostEnabled = VolumeBoost.isOn(level)) }
+        send("boost") { put("percent", level) }
     }
 
     override suspend fun setMuted(muted: Boolean) {
@@ -193,6 +218,43 @@ class BrowserEngine(
                 else -> current
             }
         }
+    }
+
+    /**
+     * What the page could tell of the stream it is playing -- a browser knows its sample rate and channels once
+     * it has decoded some -- put over what yt-dlp said of it. Only for the song loaded now.
+     */
+    fun reportFormat(load: Int, codec: String?, bitsPerSecond: Int?, sampleRateHz: Int?, channels: Int?) {
+        if (load != generation) return
+        mutableState.update { current ->
+            val known = current.format ?: StreamFormat()
+            current.copy(
+                format = StreamFormat(
+                    codec = codec?.takeIf(String::isNotBlank) ?: known.codec,
+                    sampleRateHz = sampleRateHz?.takeIf { it > 0 } ?: known.sampleRateHz,
+                    channels = channels?.takeIf { it > 0 } ?: known.channels,
+                    bitsPerSecond = bitsPerSecond?.takeIf { it > 0 } ?: known.bitsPerSecond,
+                ),
+            )
+        }
+    }
+
+    /** What the stream is, as far as it is known before the page has played any: its codec. */
+    private fun formatOf(stream: Stream): StreamFormat? {
+        val codec = when (stream) {
+            is Stream.Remote -> stream.found.codec.takeIf { it.isNotBlank() && it != "none" }
+                ?: stream.found.extension.takeIf { !stream.found.isHls && it.isNotBlank() }
+            is Stream.Local -> stream.file.fileName.toString().substringAfterLast('.', "").lowercase().let { extension ->
+                when (extension) {
+                    "m4a", "mp4", "aac" -> "aac"
+                    "ogg", "oga" -> "vorbis"
+                    "webm" -> "opus"
+                    "" -> null
+                    else -> extension
+                }
+            }
+        }
+        return codec?.let { StreamFormat(codec = it) }
     }
 
     private fun send(type: String, body: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit = {}): Boolean {
