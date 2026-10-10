@@ -135,8 +135,13 @@ val buildWebPlayer by tasks.registering(Exec::class) {
         inputs.files(fileTree(source) { include("vite.config.*", "tsconfig*.json", "package-lock.json") })
         inputs.files(fileTree(source) { include("public/**") })
         outputs.dir(File(source, "dist"))
-        // ci when there is a lockfile and node_modules is missing, so a clean checkout builds; then build.
-        val install = if (File(source, "node_modules").isDirectory) "" else "$npm ci && "
+        // ci when node_modules is missing, so a clean checkout builds -- and when the lockfile has moved on since
+        // the last install, so a web player that gained a dependency (vitest, once) does not fail its type check
+        // in a checkout that installed the old set. npm records what it installed in node_modules/.package-lock.json.
+        val lock = File(source, "package-lock.json")
+        val installed = File(source, "node_modules/.package-lock.json")
+        val stale = !File(source, "node_modules").isDirectory || (lock.isFile && (!installed.isFile || lock.lastModified() > installed.lastModified()))
+        val install = if (stale) "$npm ci && " else ""
         if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
             commandLine("cmd", "/c", "${install}$npm run build")
         } else {
