@@ -66,13 +66,15 @@ sealed interface Overlay {
                     "↑ ↓  PgUp PgDn" to "Choose; the mouse wheel and clicks work too",
                     "Enter" to "Play it from here, or open it",
                     "Esc  Backspace" to "Back",
-                    of(KeyAction.SEARCH) to "Search every service at once, or paste a link",
+                    of(KeyAction.SEARCH) to "Search every service, or paste a link; in Settings, find a setting",
                 ),
                 "Playing" to listOf(
                     of(KeyAction.PLAY_PAUSE) to "Play or pause",
                     of(KeyAction.NEXT, KeyAction.PREVIOUS) to "Next, previous",
+                    of(KeyAction.STOP, KeyAction.STOP_AFTER) to "Stop, back at the start; stop after this song",
                     "← →" to "Back or on five seconds; with Shift, thirty",
                     "${k.name(KeyAction.VOLUME_UP)} ${k.name(KeyAction.VOLUME_DOWN)}  ${k.name(KeyAction.MUTE)}" to "Volume, mute",
+                    of(KeyAction.BOOSTER) to "The volume and the booster, up to 1000%",
                     of(KeyAction.SHUFFLE, KeyAction.REPEAT) to "Shuffle, repeat",
                     of(KeyAction.SLOWER, KeyAction.FASTER) to "Slower or faster, from half to double speed",
                     of(KeyAction.SLEEP_TIMER) to "Sleep timer",
@@ -527,6 +529,9 @@ object Overlays {
                 add("In $minutes minutes" to { state.startSleepTimer(minutes); tui.toast("Stopping in $minutes minutes") })
             }
             add("At the end of this track" to { state.sleepAtEndOfTrack(); tui.toast("Stopping at the end of this track") })
+            // Not a sleep timer, but where somebody looks for one: nothing more plays once this song ends, and the
+            // queue waits on the next one.
+            add((if (state.stopAfterCurrent.value) "Play on after this song" else "Stop after this song") to { tui.toggleStopAfter() })
             if (state.sleepTimer.value != null) add("Ten more minutes" to { state.extendSleepTimer(10) })
         }
         return Overlay.Picker("Sleep timer", options)

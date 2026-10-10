@@ -8,7 +8,7 @@ import app.noctorium.playback.PlaybackStatus
 /**
  * The record: the cover, the track, and the lyrics lit up line by line as they are sung, laid out as the
  * listener chose in Settings (see [TuiNowPlaying]) -- the cover with the lyrics beside it, a poster in big type,
- * the cover as large as it goes, or the lyrics large.
+ * the cover as large as it goes, the lyrics large, or a desktop music player's window ([PlaylistLayout]).
  *
  * The lyrics are the ones every Noctorium finds -- eight sources asked at once -- with the source chosen in
  * the chips above them, and [ / ] to change it, which is remembered for the songs after, as it is on the
@@ -26,6 +26,8 @@ object NowPlaying {
         val p = tui.palette
         val state = tui.state
         val playback = state.playback.value
+        // The Playlist layout is the queue as much as the song, and has something to show with nothing playing.
+        if (tui.preferences.nowPlaying == TuiNowPlaying.PLAYLIST) return PlaylistLayout.draw(tui, canvas, x, y, w, h)
         val track = playback.track
         if (track == null) {
             canvas.writeCentred(x, w, y + h / 2 - 1, "Nothing is playing", p.subtext, null, BOLD)
@@ -43,6 +45,7 @@ object NowPlaying {
             // With covers hidden there is nothing for this one to show but the words, which the poster sets larger.
             TuiNowPlaying.COVER -> if (tui.preferences.coverArt) cover(tui, canvas, x, y, w, h, track) else poster(tui, canvas, x, y, w, h, track)
             TuiNowPlaying.LYRICS -> singAlong(tui, canvas, x, y, w, h, track)
+            TuiNowPlaying.PLAYLIST -> PlaylistLayout.draw(tui, canvas, x, y, w, h)
         }
     }
 
@@ -411,6 +414,7 @@ object NowPlaying {
     }
 
     fun handle(tui: Tui, input: Input): Boolean {
+        if (tui.preferences.nowPlaying == TuiNowPlaying.PLAYLIST) return PlaylistLayout.handle(tui, input)
         val state = tui.state
         val track = state.playback.value.track ?: return false
         if (input is Input.Key) when (input.key) {

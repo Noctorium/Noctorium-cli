@@ -10,16 +10,20 @@ import app.noctorium.lyrics.LyricsProviderId
 import app.noctorium.playback.PlaybackTool
 import app.noctorium.playback.PlaybackToolInstaller
 import app.noctorium.playback.ToolOrigin
+import app.noctorium.playback.VolumeBoost
 import app.noctorium.settings.AccentPreset
 import app.noctorium.settings.EqualizerPreset
 import app.noctorium.settings.AccountConnectionStatus
 import app.noctorium.settings.AutoplaySource
+import app.noctorium.settings.HomePlay
 import app.noctorium.settings.ProgressBarStyle
+import app.noctorium.settings.QueueColumn
 import app.noctorium.settings.ScrobbleConnectionStatus
 import app.noctorium.settings.DEFAULT_HYBRID_SEARCH
 import app.noctorium.settings.ThemePreset
 import app.noctorium.settings.ThemeSkin
 import app.noctorium.settings.TimeDisplay
+import app.noctorium.settings.VisualiserStyle
 import app.noctorium.settings.themeSkin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,12 +35,26 @@ import java.nio.file.Path
 /**
  * Settings and Devices, as lists of things to change.
  *
- * Accounts first, because nothing much happens until one is signed in; then how it looks; then the rest.
- * Every value here is the same setting the desktop has, kept in this program's own settings file -- except
- * the ones that only mean something in a terminal, such as the layouts, which live in [TuiPreferences].
+ * Settings is in the sections every Noctorium has -- You, Look, Listening, Services, This device, About -- and the
+ * search above it finds any of them by name, by what it says it does, or by another word for it ([SettingsIndex]).
+ * Every value here is the same setting the desktop has, kept in this program's own settings file -- except the
+ * ones that only mean something in a terminal, such as the layouts and the symbols, which live in [TuiPreferences].
+ * Each setting's row carries the id the search knows it by.
  */
 object Settings {
     private val io = CoroutineScope(Dispatchers.IO)
+
+    /** The sections, in their order, as the search names them too. */
+    const val YOU = "You"
+    const val LOOK = "Look"
+    const val LISTENING = "Listening"
+    const val SERVICES = "Services"
+    const val DEVICE = "This device"
+    const val ABOUT = "About"
+    val SECTIONS = listOf(YOU, LOOK, LISTENING, SERVICES, DEVICE, ABOUT)
+
+    /** The booster's stops for the arrows in Settings: finer where it is quieter, a hundred at a time above 300%. */
+    val BOOST_STEPS = listOf(100, 125, 150, 175, 200, 250, 300, 400, 500, 600, 700, 800, 900, 1000)
 
     fun rows(tui: Tui): List<Row> = buildList {
         val state = tui.state
@@ -44,7 +62,268 @@ object Settings {
         val preferences = settings.preferences
         val likes = state.likes.value
 
-        add(Row.Header("Accounts"))
+        // --- You: the account that counts the listening, and where else the listening goes. ---
+        add(Row.Header(YOU))
+        val account = state.account.value
+        add(
+            Row.Action(
+                "Noctorium account",
+                value = account.user?.let { "Signed in as ${it.displayName.ifBlank { it.email }}" } ?: "Optional: counts your listening, and Connect",
+                tone = if (account.signedIn) Row.Tone.GOOD else Row.Tone.QUIET,
+                run = {
+                    if (account.signedIn) tui.overlays.addLast(Overlay.Confirm("Sign out of your Noctorium account?") { state.signOutOfNoctorium() })
+                    else tui.overlays.addLast(
+                        Overlay.Prompt("Noctorium account", "Your email address.") { email ->
+                            if (email.isBlank()) return@Prompt
+                            tui.overlays.addLast(Overlay.Prompt("Noctorium account", "Your password, for $email.", secret = true) { password ->
+                                if (password.isNotBlank()) state.logInToNoctorium(email, password)
+                            })
+                        },
+                    )
+                },
+                id = "account",
+            ),
+        )
+        val scrobbling = settings.scrobbling
+        add(
+            Row.Action(
+                "Last.fm",
+                value = when (scrobbling.lastFm.status) {
+                    ScrobbleConnectionStatus.CONNECTED -> "Scrobbling as ${scrobbling.lastFm.username.orEmpty()}"
+                    ScrobbleConnectionStatus.AWAITING_APPROVAL -> "Approve in the browser, then Enter"
+                    ScrobbleConnectionStatus.CONNECTING -> "Connecting…"
+                    ScrobbleConnectionStatus.ERROR -> scrobbling.lastFm.message ?: "Not working"
+                    ScrobbleConnectionStatus.DISCONNECTED -> "Not connected"
+                },
+                tone = scrobbleTone(scrobbling.lastFm.status),
+                run = {
+                    when (scrobbling.lastFm.status) {
+                        ScrobbleConnectionStatus.CONNECTED -> tui.overlays.addLast(Overlay.Confirm("Stop scrobbling to Last.fm?") { state.disconnectLastFm() })
+                        ScrobbleConnectionStatus.AWAITING_APPROVAL -> state.finishLastFmLogin()
+                        else -> state.beginLastFmLogin()
+                    }
+                },
+                id = "lastfm",
+            ),
+        )
+        add(
+            Row.Action(
+                "ListenBrainz",
+                value = if (scrobbling.listenBrainz.status == ScrobbleConnectionStatus.CONNECTED) "Scrobbling as ${scrobbling.listenBrainz.username.orEmpty()}" else "Not connected",
+                tone = scrobbleTone(scrobbling.listenBrainz.status),
+                run = {
+                    if (scrobbling.listenBrainz.status == ScrobbleConnectionStatus.CONNECTED) {
+                        tui.overlays.addLast(Overlay.Confirm("Stop scrobbling to ListenBrainz?") { state.disconnectListenBrainz() })
+                    } else {
+                        tui.overlays.addLast(Overlay.Prompt("ListenBrainz", "Your user token, from listenbrainz.org/settings.", secret = true) { if (it.isNotBlank()) state.connectListenBrainz(it) })
+                    }
+                },
+                id = "listenbrainz",
+            ),
+        )
+        add(
+            Row.Action("Discord shows what is playing", value = onOff(preferences.discord.enabled), step = { state.setDiscordPresence(!preferences.discord.enabled) }, run = {
+                if (preferences.discord.enabled) state.testDiscordConnection() else state.setDiscordPresence(true)
+            }, id = "discord"),
+        )
+        add(Row.Gap)
+
+        // --- Look ---
+        add(Row.Header(LOOK))
+        val themes = ThemePreset.entries.filter { it.colours != null }
+        // A Windows theme is in force: read from the settings, which the palette only catches up with at the next frame.
+        val windows = preferences.themeSkin != ThemeSkin.STANDARD
+        add(
+            Row.Action("Theme", value = themeName(preferences.theme), step = { by -> tui.cycleTheme(by) }, run = {
+                tui.overlays.addLast(Overlay.Picker("Theme", themes.map { theme -> themeName(theme) to { state.setTheme(theme) } }))
+            }, id = "theme"),
+        )
+        add(Row.Action("Accent", value = preferences.accent.displayName, step = { by -> state.setAccent(cycle(AccentPreset.entries, preferences.accent, by)) }, id = "accent"))
+        val glyphs = tui.preferences.glyphs
+        add(
+            Row.Action("Symbols", value = glyphs.displayName, detail = glyphs.description, step = { by ->
+                tui.preferences.glyphs = cycle(TuiGlyphs.entries, glyphs, by)
+                tui.preferences.save()
+            }, id = "glyphs"),
+        )
+        val bar = tui.preferences.playerBar
+        add(
+            Row.Action("Player bar", value = bar.displayName, detail = bar.description, step = { by ->
+                tui.preferences.playerBar = cycle(TuiPlayerBar.entries, bar, by)
+                tui.preferences.save()
+            }, id = "playerBar"),
+        )
+        // The taskbar's clock, offered only where a taskbar may be showing it: the Taskbar layout's, and the
+        // Windows themes'. The setting is core's, so the web page this player serves follows it too.
+        if (bar == TuiPlayerBar.TASKBAR || windows) {
+            add(
+                Row.Action(
+                    "Show the clock",
+                    value = if (preferences.taskbarClock) "Shown" else "Hidden",
+                    detail = "The time at the end of the taskbar's tray, which also sets the sleep timer",
+                    step = { state.setTaskbarClock(!preferences.taskbarClock) },
+                    id = "taskbarClock",
+                ),
+            )
+        }
+        add(
+            Row.Action("Seek bar", value = preferences.progressBarStyle.displayName, detail = preferences.progressBarStyle.description, step = { by ->
+                state.setProgressBarStyle(cycle(ProgressBarStyle.entries, preferences.progressBarStyle, by))
+            }, id = "seekBar"),
+        )
+        val nowPlaying = tui.preferences.nowPlaying
+        add(
+            Row.Action("Now playing", value = nowPlaying.displayName, detail = nowPlaying.description, step = { by ->
+                tui.preferences.nowPlaying = cycle(TuiNowPlaying.entries, nowPlaying, by)
+                tui.preferences.save()
+            }, id = "nowPlaying"),
+        )
+        // The Playlist layout's own: shared with every Noctorium, so the desktop's and the web page's follow them.
+        add(
+            Row.Action("Visualiser", value = preferences.visualiser.displayName, detail = preferences.visualiser.description, step = { by ->
+                state.setVisualiser(cycle(VisualiserStyle.entries, preferences.visualiser, by))
+            }, id = "visualiser"),
+        )
+        val columns = QueueColumn.normalised(preferences.queueColumns)
+        add(
+            Row.Action(
+                "Queue table columns",
+                value = columns.joinToString(", ") { it.heading },
+                detail = "In the Playlist layout of Now playing",
+                run = { tui.overlays.addLast(queueColumns(tui)) },
+                id = "queueColumns",
+            ),
+        )
+        add(
+            Row.Action(
+                "Status bar",
+                value = if (preferences.statusBar) "Shown" else "Hidden",
+                detail = "What is playing and how far into the queue, under the Playlist layout",
+                step = { state.setStatusBar(!preferences.statusBar) },
+                id = "statusBar",
+            ),
+        )
+        add(Row.Action("Time on the right", value = preferences.timeDisplay.displayName, step = { by -> state.setTimeDisplay(cycle(TimeDisplay.entries, preferences.timeDisplay, by)) }, id = "timeDisplay"))
+        add(
+            Row.Action("Covers", value = if (tui.preferences.coverArt) "Shown" else "Hidden", step = {
+                tui.preferences.coverArt = !tui.preferences.coverArt
+                tui.preferences.save()
+            }, id = "covers"),
+        )
+        // The Windows themes are slabs of their own grey or beige, and keep it whichever this says: see Palette.
+        val background = when {
+            !tui.preferences.terminalBackground -> "The theme's"
+            windows -> "The terminal's own, except in the Windows themes"
+            else -> "The terminal's own"
+        }
+        add(
+            Row.Action("Background", value = background, step = {
+                tui.preferences.terminalBackground = !tui.preferences.terminalBackground
+                tui.preferences.save()
+                tui.screen.invalidate()
+            }, id = "background"),
+        )
+        add(Row.Gap)
+
+        // --- Listening ---
+        add(Row.Header(LISTENING))
+        add(boosterRow(tui))
+        // The equaliser's presets, with Off first; a curve of the listener's own, set on the desktop or the
+        // phone, shows as itself and is one of the stops, so stepping past it does not lose it.
+        val equalizer = preferences.equalizer
+        val choices = listOf<EqualizerPreset?>(null) + EqualizerPreset.entries.filter { it != EqualizerPreset.CUSTOM || equalizer.preset == EqualizerPreset.CUSTOM }
+        add(
+            Row.Action("Equaliser", value = if (equalizer.enabled) equalizer.preset.displayName else "Off", step = { by ->
+                when (val next = cycle(choices, equalizer.preset.takeIf { equalizer.enabled }, by)) {
+                    null -> state.updateEqualizer { copy(enabled = false) }
+                    else -> state.setEqualizerPreset(next)
+                }
+            }, id = "equaliser"),
+        )
+        add(
+            Row.Action(
+                "Speed",
+                value = speedName(preferences.playbackSpeed) + if (preferences.playbackSpeed == 1f) " (as recorded)" else "",
+                step = { by -> tui.changeSpeed(by, say = false) },
+                id = "speed",
+            ),
+        )
+        add(
+            Row.Action(
+                "When the queue runs out",
+                value = if (preferences.autoplay) "Carry on with songs like the last" else "Stop",
+                step = { state.setAutoplay(!preferences.autoplay) },
+                id = "autoplay",
+            ),
+        )
+        // Where autoplay's songs come from, and which it leaves out; both shown with autoplay off too, so they
+        // are set before it is switched on.
+        add(
+            Row.Action(
+                "Autoplay draws from",
+                value = preferences.autoplayFrom.displayName,
+                step = { by -> state.setAutoplayFrom(cycle(AutoplaySource.entries, preferences.autoplayFrom, by)) },
+                id = "autoplayFrom",
+            ),
+        )
+        add(
+            Row.Action(
+                "Autoplay skips songs played lately",
+                value = onOff(preferences.autoplayAvoidRecent),
+                step = { state.setAutoplayAvoidRecent(!preferences.autoplayAvoidRecent) },
+                id = "avoidRecent",
+            ),
+        )
+        // With autoplay off there is no radio to start, and core plays the rest of the shelf whatever this says.
+        add(
+            Row.Action(
+                "Playing a song from Home",
+                value = preferences.homePlay.displayName,
+                detail = if (preferences.autoplay) preferences.homePlay.description else "Autoplay is off, so the rest of the shelf plays",
+                step = { by -> state.setHomePlay(cycle(HomePlay.entries, preferences.homePlay, by)) },
+                id = "homePlay",
+            ),
+        )
+        add(
+            Row.Action(
+                "Keep the queue between launches",
+                value = if (preferences.keepQueue) "On: it is back where it was left" else "Off",
+                step = { state.setKeepQueue(!preferences.keepQueue) },
+                id = "keepQueue",
+            ),
+        )
+        add(
+            Row.Action(
+                "Sleep timer fades out",
+                value = if (preferences.sleepFadeSeconds <= 0) "No: it stops at once" else "Over ${preferences.sleepFadeSeconds} seconds",
+                step = { by -> state.setSleepFade(cycle(FADES, preferences.sleepFadeSeconds, by)) },
+                id = "sleepFade",
+            ),
+        )
+        val asked = HYBRID_SERVICES.filter { it in preferences.hybridSearch }
+        add(
+            Row.Action(
+                "Hybrid search asks",
+                value = if (asked.size == HYBRID_SERVICES.size) "Every service" else asked.joinToString { it.displayName },
+                run = { tui.overlays.addLast(hybridSearch(tui)) },
+                id = "hybridSearch",
+            ),
+        )
+        add(Row.Action("Skip what is not the music in YouTube videos", value = onOff(preferences.skipNonMusic), step = { state.setSkipNonMusic(!preferences.skipNonMusic) }, id = "skipNonMusic"))
+        add(Row.Action("Add what is played here to YouTube history", value = onOff(preferences.youtubeHistory), step = { state.setYouTubeHistory(!preferences.youtubeHistory) }, id = "youtubeHistory"))
+        val sources = listOf<LyricsProviderId?>(null) + LyricsProviderId.entries
+        add(
+            Row.Action("Lyrics from", value = preferences.lyricsProvider?.displayName ?: "Whichever has them", step = { by ->
+                when (val next = cycle(sources, preferences.lyricsProvider, by)) {
+                    null -> state.clearPreferredLyricsProvider()
+                    else -> state.selectLyricsProvider(next)
+                }
+            }, id = "lyrics"),
+        )
+        add(Row.Gap)
+
+        // --- Services: nothing much happens until one is signed in. ---
+        add(Row.Header(SERVICES))
         val youTube = settings.youtubeAccount
         add(
             Row.Action(
@@ -58,6 +337,7 @@ object Settings {
                 },
                 tone = tone(youTube.status),
                 run = { tui.overlays.addLast(youTubeMenu(tui)) },
+                id = "youtube",
             ),
         )
         val soundCloud = settings.soundCloudAccount
@@ -73,6 +353,7 @@ object Settings {
                 },
                 tone = tone(soundCloud.status),
                 run = { tui.overlays.addLast(soundCloudMenu(tui)) },
+                id = "soundcloud",
             ),
         )
         // Spotify has two sign-ins, one asking more than the other: any account, for the library, likes, search
@@ -96,6 +377,7 @@ object Settings {
                         state.connectSpotify()
                     }
                 },
+                id = "spotify",
             ),
         )
         add(
@@ -108,6 +390,7 @@ object Settings {
                 },
                 tone = if (spotify.canPlay) Row.Tone.GOOD else Row.Tone.QUIET,
                 run = { if (!spotify.connecting) state.connectSpotifyPremium() },
+                id = "spotifyPremium",
             ),
         )
         if (spotify.canPlay) {
@@ -116,6 +399,7 @@ object Settings {
                     "Spotify songs play",
                     value = if (spotify.playsOnSpotify) "On Spotify" else "Matched on YouTube Music",
                     step = { state.setSpotifyPlayback(!spotify.playsOnSpotify) },
+                    id = "spotifyPlayback",
                 ),
             )
             add(
@@ -124,6 +408,7 @@ object Settings {
                     value = spotify.devices.firstOrNull { it.id == spotify.device }?.name
                         ?: if (spotify.device.isBlank()) "Wherever Spotify is active" else "The device chosen before",
                     run = { spotifyDevices(tui) },
+                    id = "spotifyDevice",
                 ),
             )
         }
@@ -143,6 +428,7 @@ object Settings {
                 },
                 tone = if (fan.isNotBlank() && !bandcamp.checking) Row.Tone.GOOD else Row.Tone.QUIET,
                 run = { tui.overlays.addLast(bandcampMenu(tui)) },
+                id = "bandcamp",
             ),
         )
         bandcamp.message?.let { add(Row.Note(it, if (it == BANDCAMP_REMOVED) Row.Tone.QUIET else Row.Tone.WARN)) }
@@ -151,6 +437,7 @@ object Settings {
                 "Bandcamp on Home",
                 value = preferences.bandcampGenres.joinToString { it.displayName }.ifBlank { "Best-sellers and new releases only" },
                 run = { tui.overlays.addLast(bandcampGenres(tui)) },
+                id = "bandcampGenres",
             ),
         )
         // VK: a browser's vk.ru session, pasted, since there is no browser here to sign in with.
@@ -169,126 +456,14 @@ object Settings {
                     else -> Row.Tone.QUIET
                 },
                 run = { if (!vk.checking) tui.overlays.addLast(vkMenu(tui)) },
+                id = "vk",
             ),
         )
         vk.message?.let { add(Row.Note(it)) }
-        val scrobbling = settings.scrobbling
-        add(
-            Row.Action(
-                "Last.fm",
-                value = when (scrobbling.lastFm.status) {
-                    ScrobbleConnectionStatus.CONNECTED -> "Scrobbling as ${scrobbling.lastFm.username.orEmpty()}"
-                    ScrobbleConnectionStatus.AWAITING_APPROVAL -> "Approve in the browser, then Enter"
-                    ScrobbleConnectionStatus.CONNECTING -> "Connecting…"
-                    ScrobbleConnectionStatus.ERROR -> scrobbling.lastFm.message ?: "Not working"
-                    ScrobbleConnectionStatus.DISCONNECTED -> "Not connected"
-                },
-                tone = scrobbleTone(scrobbling.lastFm.status),
-                run = {
-                    when (scrobbling.lastFm.status) {
-                        ScrobbleConnectionStatus.CONNECTED -> tui.overlays.addLast(Overlay.Confirm("Stop scrobbling to Last.fm?") { state.disconnectLastFm() })
-                        ScrobbleConnectionStatus.AWAITING_APPROVAL -> state.finishLastFmLogin()
-                        else -> state.beginLastFmLogin()
-                    }
-                },
-            ),
-        )
-        add(
-            Row.Action(
-                "ListenBrainz",
-                value = if (scrobbling.listenBrainz.status == ScrobbleConnectionStatus.CONNECTED) "Scrobbling as ${scrobbling.listenBrainz.username.orEmpty()}" else "Not connected",
-                tone = scrobbleTone(scrobbling.listenBrainz.status),
-                run = {
-                    if (scrobbling.listenBrainz.status == ScrobbleConnectionStatus.CONNECTED) {
-                        tui.overlays.addLast(Overlay.Confirm("Stop scrobbling to ListenBrainz?") { state.disconnectListenBrainz() })
-                    } else {
-                        tui.overlays.addLast(Overlay.Prompt("ListenBrainz", "Your user token, from listenbrainz.org/settings.", secret = true) { if (it.isNotBlank()) state.connectListenBrainz(it) })
-                    }
-                },
-            ),
-        )
-        val account = state.account.value
-        add(
-            Row.Action(
-                "Noctorium account",
-                value = account.user?.let { "Signed in as ${it.displayName.ifBlank { it.email }}" } ?: "Optional: counts your listening, and Connect",
-                tone = if (account.signedIn) Row.Tone.GOOD else Row.Tone.QUIET,
-                run = {
-                    if (account.signedIn) tui.overlays.addLast(Overlay.Confirm("Sign out of your Noctorium account?") { state.signOutOfNoctorium() })
-                    else tui.overlays.addLast(
-                        Overlay.Prompt("Noctorium account", "Your email address.") { email ->
-                            if (email.isBlank()) return@Prompt
-                            tui.overlays.addLast(Overlay.Prompt("Noctorium account", "Your password, for $email.", secret = true) { password ->
-                                if (password.isNotBlank()) state.logInToNoctorium(email, password)
-                            })
-                        },
-                    )
-                },
-            ),
-        )
         add(Row.Gap)
 
-        add(Row.Header("Look"))
-        val themes = ThemePreset.entries.filter { it.colours != null }
-        // A Windows theme is in force: read from the settings, which the palette only catches up with at the next frame.
-        val windows = preferences.themeSkin != ThemeSkin.STANDARD
-        add(
-            Row.Action("Theme", value = themeName(preferences.theme), step = { by -> tui.cycleTheme(by) }, run = {
-                tui.overlays.addLast(Overlay.Picker("Theme", themes.map { theme -> themeName(theme) to { state.setTheme(theme) } }))
-            }),
-        )
-        add(Row.Action("Accent", value = preferences.accent.displayName, step = { by -> state.setAccent(cycle(AccentPreset.entries, preferences.accent, by)) }))
-        add(
-            Row.Action("Seek bar", value = preferences.progressBarStyle.displayName, detail = preferences.progressBarStyle.description, step = { by ->
-                state.setProgressBarStyle(cycle(ProgressBarStyle.entries, preferences.progressBarStyle, by))
-            }),
-        )
-        val bar = tui.preferences.playerBar
-        add(
-            Row.Action("Player bar", value = bar.displayName, detail = bar.description, step = { by ->
-                tui.preferences.playerBar = cycle(TuiPlayerBar.entries, bar, by)
-                tui.preferences.save()
-            }),
-        )
-        // The taskbar's clock, offered only where a taskbar may be showing it: the Taskbar layout's, and the
-        // Windows themes'. The setting is core's, so the web page this player serves follows it too.
-        if (bar == TuiPlayerBar.TASKBAR || windows) {
-            add(
-                Row.Action(
-                    "Show the clock",
-                    value = if (preferences.taskbarClock) "Shown" else "Hidden",
-                    detail = "The time at the end of the taskbar's tray, which also sets the sleep timer",
-                    step = { state.setTaskbarClock(!preferences.taskbarClock) },
-                ),
-            )
-        }
-        val nowPlaying = tui.preferences.nowPlaying
-        add(
-            Row.Action("Now playing", value = nowPlaying.displayName, detail = nowPlaying.description, step = { by ->
-                tui.preferences.nowPlaying = cycle(TuiNowPlaying.entries, nowPlaying, by)
-                tui.preferences.save()
-            }),
-        )
-        add(Row.Action("Time on the right", value = preferences.timeDisplay.displayName, step = { by -> state.setTimeDisplay(cycle(TimeDisplay.entries, preferences.timeDisplay, by)) }))
-        // The Windows themes are slabs of their own grey or beige, and keep it whichever this says: see Palette.
-        val background = when {
-            !tui.preferences.terminalBackground -> "The theme's"
-            windows -> "The terminal's own, except in the Windows themes"
-            else -> "The terminal's own"
-        }
-        add(
-            Row.Action("Background", value = background, step = {
-                tui.preferences.terminalBackground = !tui.preferences.terminalBackground
-                tui.preferences.save()
-                tui.screen.invalidate()
-            }),
-        )
-        add(
-            Row.Action("Covers", value = if (tui.preferences.coverArt) "Shown" else "Hidden", step = {
-                tui.preferences.coverArt = !tui.preferences.coverArt
-                tui.preferences.save()
-            }),
-        )
+        // --- This device: the keys, where things are kept, and the tools that play. ---
+        add(Row.Header(DEVICE))
         val changedKeys = tui.keys.changes.size
         add(
             Row.Action(
@@ -299,100 +474,14 @@ object Settings {
                     tui.keysOpen = true
                     tui.list("SETTINGS:keys").selected = 0
                 },
+                id = "keys",
             ),
-        )
-        add(Row.Gap)
-
-        add(Row.Header("Playing"))
-        add(
-            Row.Action(
-                "Speed",
-                value = speedName(preferences.playbackSpeed) + if (preferences.playbackSpeed == 1f) " (as recorded)" else "",
-                step = { by -> tui.changeSpeed(by, say = false) },
-            ),
-        )
-        add(
-            Row.Action(
-                "When the queue runs out",
-                value = if (preferences.autoplay) "Carry on with songs like the last" else "Stop",
-                step = { state.setAutoplay(!preferences.autoplay) },
-            ),
-        )
-        // Where autoplay's songs come from, and which it leaves out; both shown with autoplay off too, so they
-        // are set before it is switched on.
-        add(
-            Row.Action(
-                "Autoplay draws from",
-                value = preferences.autoplayFrom.displayName,
-                step = { by -> state.setAutoplayFrom(cycle(AutoplaySource.entries, preferences.autoplayFrom, by)) },
-            ),
-        )
-        add(
-            Row.Action(
-                "Autoplay skips songs played lately",
-                value = onOff(preferences.autoplayAvoidRecent),
-                step = { state.setAutoplayAvoidRecent(!preferences.autoplayAvoidRecent) },
-            ),
-        )
-        add(
-            Row.Action(
-                "Keep the queue between launches",
-                value = if (preferences.keepQueue) "On: it is back where it was left" else "Off",
-                step = { state.setKeepQueue(!preferences.keepQueue) },
-            ),
-        )
-        add(
-            Row.Action(
-                "Sleep timer fades out",
-                value = if (preferences.sleepFadeSeconds <= 0) "No: it stops at once" else "Over ${preferences.sleepFadeSeconds} seconds",
-                step = { by -> state.setSleepFade(cycle(FADES, preferences.sleepFadeSeconds, by)) },
-            ),
-        )
-        val asked = HYBRID_SERVICES.filter { it in preferences.hybridSearch }
-        add(
-            Row.Action(
-                "Hybrid search asks",
-                value = if (asked.size == HYBRID_SERVICES.size) "Every service" else asked.joinToString { it.displayName },
-                run = { tui.overlays.addLast(hybridSearch(tui)) },
-            ),
-        )
-        add(Row.Action("Skip what is not the music in YouTube videos", value = onOff(preferences.skipNonMusic), step = { state.setSkipNonMusic(!preferences.skipNonMusic) }))
-        add(Row.Action("Volume boost", value = onOff(state.playback.value.volumeBoostEnabled), step = { state.toggleVolumeBoost() }))
-        // The equaliser's presets, with Off first; a curve of the listener's own, set on the desktop or the
-        // phone, shows as itself and is one of the stops, so stepping past it does not lose it.
-        val equalizer = preferences.equalizer
-        val choices = listOf<EqualizerPreset?>(null) + EqualizerPreset.entries.filter { it != EqualizerPreset.CUSTOM || equalizer.preset == EqualizerPreset.CUSTOM }
-        add(
-            Row.Action("Equaliser", value = if (equalizer.enabled) equalizer.preset.displayName else "Off", step = { by ->
-                when (val next = cycle(choices, equalizer.preset.takeIf { equalizer.enabled }, by)) {
-                    null -> state.updateEqualizer { copy(enabled = false) }
-                    else -> state.setEqualizerPreset(next)
-                }
-            }),
-        )
-        add(Row.Action("Add what is played here to YouTube history", value = onOff(preferences.youtubeHistory), step = { state.setYouTubeHistory(!preferences.youtubeHistory) }))
-        val sources = listOf<LyricsProviderId?>(null) + LyricsProviderId.entries
-        add(
-            Row.Action("Lyrics from", value = preferences.lyricsProvider?.displayName ?: "Whichever has them", step = { by ->
-                when (val next = cycle(sources, preferences.lyricsProvider, by)) {
-                    null -> state.clearPreferredLyricsProvider()
-                    else -> state.selectLyricsProvider(next)
-                }
-            }),
-        )
-        add(
-            Row.Action("Discord shows what is playing", value = onOff(preferences.discord.enabled), step = { state.setDiscordPresence(!preferences.discord.enabled) }, run = {
-                if (preferences.discord.enabled) state.testDiscordConnection() else state.setDiscordPresence(true)
-            }),
         )
         add(
             Row.Action("Downloads go to", value = state.exportFolder()?.toString() ?: "Not set", run = {
                 tui.overlays.addLast(Overlay.Prompt("Downloads folder", "Where saved MP3s are written.", state.exportFolder()?.toString().orEmpty()) { if (it.isNotBlank()) state.setExportFolder(it) })
-            }),
+            }, id = "downloads"),
         )
-        add(Row.Gap)
-
-        add(Row.Header("The tools Noctorium plays with"))
         val tools = PlaybackToolInstaller.state.value
         PlaybackTool.entries.forEach { tool ->
             val status = tools.status(tool)
@@ -412,9 +501,14 @@ object Settings {
                             tui.toast(problem ?: "${tool.displayName} is ready", if (problem == null) Row.Tone.GOOD else Row.Tone.BAD, 8)
                         }
                     },
+                    id = "tool:${tool.name}",
                 ),
             )
         }
+        add(Row.Gap)
+
+        // --- About: this copy, keeping it up to date, and what it finds when it looks at itself. ---
+        add(Row.Header(ABOUT))
         // Updating: the check by hand, and whether it happens by itself once a day. A copy that cannot replace
         // itself -- a build, or one a package manager owns -- is still told about new versions, and says how
         // it should be updated instead.
@@ -431,6 +525,7 @@ object Settings {
                 },
                 tone = if (updating.waiting != null) Row.Tone.GOOD else Row.Tone.NORMAL,
                 run = { tui.checkForUpdates() },
+                id = "updates",
             ),
         )
         val automatic = preferences.updates.checkOnLaunch
@@ -439,14 +534,65 @@ object Settings {
                 if (updates.canInstall) "Update automatically" else "Look for updates once a day",
                 value = if (CliUpdates.disabledByEnvironment(System::getenv)) "Off: ${CliUpdates.ENVIRONMENT} is set" else onOff(automatic),
                 step = { state.setUpdateCheckOnLaunch(!automatic) },
+                id = "autoUpdate",
             ),
         )
         if (!updates.canInstall) add(Row.Note(updates.installer.installation.advice))
-        add(Row.Action("Run the diagnostics", hint = "yt-dlp, mpv, the network and the folders", run = { state.runDiagnostics(); tui.toast("Checking…") }))
+        add(Row.Action("Run the diagnostics", hint = "yt-dlp, mpv, the network and the folders", run = { state.runDiagnostics(); tui.toast("Checking…") }, id = "diagnostics"))
         settings.diagnostics.forEach { result ->
             add(Row.Note("${result.name}: ${result.detail}", when (result.level.name) { "PASS" -> Row.Tone.GOOD; "WARNING" -> Row.Tone.WARN; else -> Row.Tone.BAD }))
         }
         add(Row.Note("Noctorium CLI $cliVersion · its data: ${CliHome.own ?: "nowhere"}"))
+    }
+
+    /**
+     * The volume booster: its level, from 100% (off) to 1000%, stepped through [BOOST_STEPS] by the arrows, and the
+     * volume panel on Enter. Loud past 200%, and not there at all where Spotify's own app is playing.
+     */
+    private fun boosterRow(tui: Tui): Row.Action {
+        val state = tui.state
+        val level = VolumeBoost.clamp(state.settings.value.preferences.volumeBoostPercent)
+        val available = state.playback.value.volumeBoostAvailable
+        val on = VolumeBoost.isOn(level)
+        return Row.Action(
+            "Volume booster",
+            value = when {
+                !available -> "Not available here" + if (on) " (${VolumeBoost.percentLabel(level)} kept)" else ""
+                on -> "${VolumeBoost.percentLabel(level)} · ${VolumeBoost.timesLabel(level)}"
+                else -> "Off"
+            },
+            tone = if (available && VolumeBoost.isLoud(level)) Row.Tone.WARN else Row.Tone.NORMAL,
+            detail = when {
+                !available -> VolumeBoost.UNAVAILABLE
+                VolumeBoost.isLoud(level) -> VolumeBoost.LOUD_WARNING
+                else -> "Up to 1000%, always behind a limiter · Enter for the slider"
+            },
+            step = { by ->
+                if (!available) {
+                    tui.toast(VolumeBoost.UNAVAILABLE, Row.Tone.WARN)
+                } else {
+                    val next = if (by > 0) BOOST_STEPS.firstOrNull { it > level } ?: BOOST_STEPS.last() else BOOST_STEPS.lastOrNull { it < level } ?: BOOST_STEPS.first()
+                    state.setVolumeBoostPercent(next)
+                }
+            },
+            run = { tui.overlays.addLast(VolumePanel(booster = true)) },
+            id = "booster",
+        )
+    }
+
+    /** The queue table's columns, ticked in a list of all of them, in the order they were ticked; the title is always one. */
+    private fun queueColumns(tui: Tui): Overlay {
+        val state = tui.state
+        val all = QueueColumn.entries
+        return Overlay.Checklist(
+            "Queue table columns",
+            all.map { if (it == QueueColumn.TITLE) "${it.displayName} (always)" else it.displayName },
+            QueueColumn.normalised(state.settings.value.preferences.queueColumns).map(all::indexOf),
+            "In the order ticked · Space ticks · Esc when done",
+        ) { chosen ->
+            val picked = QueueColumn.normalised(chosen.map { all[it] })
+            if (picked != state.settings.value.preferences.queueColumns) state.setQueueColumns(picked)
+        }
     }
 
     fun deviceRows(tui: Tui): List<Row> = buildList {

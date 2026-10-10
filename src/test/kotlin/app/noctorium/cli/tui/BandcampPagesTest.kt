@@ -108,6 +108,8 @@ class BandcampPagesTest {
     @Test
     fun `Settings has the Bandcamp collection and the genres Home has rows for`() {
         tui.page = Page.SETTINGS
+        // Services is a section down the page; the settings search goes straight to it.
+        SettingsIndex.jump(tui, "bandcamp")
         val page = drawn("settings")
         assertTrue(page.any { "Bandcamp collection" in it && "bandcamp.com/${BandcampStandIn.FAN}" in it }, page.joinToString("\n"))
         assertTrue(page.any { "Bandcamp on Home" in it && "Electronic, Hip-hop and rap, Ambient" in it }, page.joinToString("\n"))

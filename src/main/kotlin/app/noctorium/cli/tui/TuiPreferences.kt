@@ -24,6 +24,12 @@ class TuiPreferences(
     var playerBar: TuiPlayerBar = TuiPlayerBar.FULL,
     /** How Now playing is laid out. */
     var nowPlaying: TuiNowPlaying = TuiNowPlaying.CLASSIC,
+    /**
+     * The symbols the buttons and the pages are drawn with: the terminal's own, as they have always been, plain
+     * ASCII, or a Nerd Font's icons. The terminal's answer to core's icon sets, which are drawn shapes a cell
+     * cannot hold; see [Glyphs].
+     */
+    var glyphs: TuiGlyphs = TuiGlyphs.STANDARD,
 ) {
     fun save() {
         val path = AppDirectories.resolve("terminal.json") ?: return
@@ -69,6 +75,10 @@ enum class TuiPlayerBar(val displayName: String, val description: String) {
         "Taskbar",
         "A desktop's taskbar: a start button that opens Now playing, the song as a pressed button, and a tray with the volume and the clock.",
     ),
+    TOOLBAR(
+        "Toolbar",
+        "One row of flat buttons, as a desktop music player has them: add to a playlist, previous, play, pause, stop and next, a slider and the time, then repeat, shuffle and the volume.",
+    ),
 }
 
 /** How Now playing is laid out in a terminal; chosen apart from the desktop's and the phone's, as the bar is. */
@@ -89,5 +99,29 @@ enum class TuiNowPlaying(val displayName: String, val description: String) {
     LYRICS(
         "Lyrics",
         "The lyrics large and centred on the line being sung, under a small cover and the controls.",
+    ),
+    PLAYLIST(
+        "Playlist",
+        "The cover in a panel on the left, the queue as a table with columns, an info bar with the title large and a visualiser, and a status bar.",
+    ),
+}
+
+/**
+ * The symbols the terminal draws its buttons and pages with, chosen in Settings. Core's icon sets are drawn
+ * shapes -- rounded, outlined, a thin line -- and a cell holds a character, so the terminal has these instead.
+ */
+@Serializable
+enum class TuiGlyphs(val displayName: String, val description: String) {
+    STANDARD(
+        "Standard",
+        "The symbols the terminal player has always drawn, which every terminal's font has.",
+    ),
+    ASCII(
+        "Plain ASCII",
+        "Letters and signs only, for a terminal or a font that shows the symbols as boxes.",
+    ),
+    NERD_FONT(
+        "Nerd Font",
+        "A Nerd Font's icons, for a terminal set in one: crisp media buttons and page icons.",
     ),
 }

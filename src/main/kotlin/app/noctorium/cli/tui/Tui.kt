@@ -6,13 +6,16 @@ import app.noctorium.cli.cliVersion
 import app.noctorium.cli.update.CliUpdates
 import app.noctorium.core.AppState
 import app.noctorium.domain.Track
+import app.noctorium.playback.AudioAnalysis
 import app.noctorium.playback.PlaybackStatus
 import app.noctorium.playback.RepeatMode
 import app.noctorium.settings.ThemeSkin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -59,12 +62,30 @@ class Tui(
     internal val art = Art { dirty.set(true) }
     internal var page = Page.HOME
     internal val lists = mutableMapOf<String, ListState>()
-    internal val listView = ListView({ palette }, state)
+    internal val listView = ListView({ palette }, state, { glyphs })
     internal var overlays = ArrayDeque<Overlay>()
     private val toasts = ArrayDeque<Toast>()
     internal var running = true
     internal var palette = Palette.from(state.settings.value.preferences, null, false)
     internal val preferences = TuiPreferences.load()
+
+    /** The symbols the buttons and the pages are drawn with, in the set chosen. */
+    internal val glyphs: Glyphs get() = Glyphs.of(preferences.glyphs)
+
+    /** The settings search: what is typed, null while it is closed, and whether the keys go to it. */
+    internal var settingsQuery: String? = null
+    internal var settingsSearchFocused = false
+
+    /**
+     * The visualiser's latest frame from the player, and how its bars stand as they fall. Measured only while a
+     * frame has a visualiser in it: [frame] says so, and [watchAnalysis] starts and stops the player's measuring.
+     */
+    @Volatile
+    internal var analysis: AudioAnalysis? = null
+    internal val meter = Meter()
+    internal var visualiserShown = false
+    private var analysisJob: Job? = null
+    private val settling = java.util.concurrent.atomic.AtomicBoolean(false)
 
     /** The keys in force: the defaults, with the listener's changes over them. See [KeyMap]. */
     internal var keys: KeyMap = KeyMap.loaded(preferences.keys)
@@ -177,6 +198,8 @@ class Tui(
         app.noctorium.playback.PlaybackToolInstaller.state.redraw()
         parts.updates.status.redraw()
         state.playback.map { it.status to it.track?.queueKey }.distinctUntilChanged().redraw()
+        state.playback.map { Triple(it.volumeBoostPercent, it.volumeBoostAvailable, it.format) }.distinctUntilChanged().redraw()
+        state.stopAfterCurrent.redraw()
         scope.launch {
             state.settings.collect { settings ->
                 settings.message?.let { toast(it); state.clearSettingsMessage() }
@@ -241,6 +264,7 @@ class Tui(
         canvas.clear(p.page, p.text)
         clickTargets.clear()
 
+        visualiserShown = false
         val barHeight = PlayerBar.height(this, h)
         val sidebar = if (w >= 96) 22 else 0
         header(canvas, w)
@@ -256,7 +280,31 @@ class Tui(
         overlayTargets = clickTargets.size
         overlays.lastOrNull()?.let { overlay -> canvas.clipped(0, 0, w, h) { overlay.draw(this, canvas, w, h) } }
         drawToasts(canvas, w, h - barHeight)
+        watchAnalysis(visualiserShown)
         return canvas
+    }
+
+    /**
+     * Has the player measure the sound for as long as frames have a visualiser in them, and stop as soon as one
+     * does not: core's engines measure only while something collects their analysis. Each frame from the player
+     * draws one here; between them, and once they stop, the bars fall a frame at a time until they settle.
+     */
+    private fun watchAnalysis(shown: Boolean) {
+        if (shown && analysisJob == null) {
+            analysisJob = scope.launch { state.audioAnalysis.collect { analysis = it; dirty.set(true) } }
+        } else if (!shown && analysisJob != null) {
+            analysisJob?.cancel()
+            analysisJob = null
+            analysis = null
+            meter.reset()
+        }
+        if (shown && meter.moving && settling.compareAndSet(false, true)) {
+            scope.launch {
+                delay(app.noctorium.playback.Visualiser.FRAME_MS)
+                settling.set(false)
+                dirty.set(true)
+            }
+        }
     }
 
     private fun header(canvas: Canvas, w: Int) {
@@ -270,7 +318,7 @@ class Tui(
         if (w < 96) {
             // No sidebar: the pages along the top instead, as numbers and names while they fit.
             Page.entries.forEachIndexed { i, entry ->
-                val label = if (w >= 120) " ${i + 1} ${entry.title} " else " ${i + 1}${entry.icon} "
+                val label = if (w >= 120) " ${i + 1} ${entry.title} " else " ${i + 1}${glyphs.page(entry)} "
                 val active = entry == page
                 val used = Canvas.displayWidth(label)
                 if (x + used >= w - 20) return@forEachIndexed
@@ -317,7 +365,7 @@ class Tui(
         var x = 14
         if (!wide) {
             Page.entries.forEachIndexed { i, entry ->
-                val label = " ${i + 1}${entry.icon} "
+                val label = " ${i + 1}${glyphs.page(entry)} "
                 val used = Canvas.displayWidth(label)
                 if (x + used >= end - 18) return@forEachIndexed
                 val active = entry == page
@@ -347,7 +395,7 @@ class Tui(
             val active = entry == page
             if (active) canvas.fill(x + 1, row, w - 3, 1, p.selection)
             val back = if (active) p.selection else bg
-            canvas.write(x + 2, row, entry.icon, if (active) p.accent else p.subtext, back, BOLD)
+            canvas.write(x + 2, row, glyphs.page(entry), if (active) p.accent else p.subtext, back, BOLD, max = 1)
             canvas.write(x + 4, row, entry.title, if (active) p.text else p.subtext, back, if (active) BOLD else 0)
             canvas.writeRight(x + w - 3, row, "${i + 1}", p.faint, back)
             val target = entry
@@ -390,7 +438,7 @@ class Tui(
             if (row >= y + h - 2) return@forEachIndexed
             val active = entry == page
             if (active) canvas.fill(x + 1, row, listW, 1, Skin.selection(p))
-            canvas.write(x + 2, row, entry.icon, if (active) Skin.selectionText(p) else p.accent, null, BOLD)
+            canvas.write(x + 2, row, glyphs.page(entry), if (active) Skin.selectionText(p) else p.accent, null, BOLD, max = 1)
             canvas.write(x + 4, row, entry.title, if (active) Skin.selectionText(p) else Skin.text(p), null, if (active) BOLD else 0)
             canvas.writeRight(x + w - 3, row, "${i + 1}", if (active) Skin.selectionText(p) else Skin.greyText(p), null)
             val target = entry
@@ -420,7 +468,7 @@ class Tui(
             val active = entry == page
             canvas.fill(x + 1, row, panelW, 1, if (active) Xp.SELECTION else Xp.TASK_PANEL)
             val colour = if (active) Xp.SELECTION_TEXT else link
-            canvas.write(x + 2, row, entry.icon, colour, null, BOLD)
+            canvas.write(x + 2, row, glyphs.page(entry), colour, null, BOLD, max = 1)
             canvas.write(x + 4, row, entry.title, colour, null, if (active) BOLD else 0)
             canvas.writeRight(x + w - 3, row, "${i + 1}", if (active) colour else mix(link, Xp.TASK_PANEL, .45f), null)
             val target = entry
@@ -500,6 +548,7 @@ class Tui(
         page = target
         keysOpen = false
         searchFocused = target == Page.SEARCH && searchText.isBlank()
+        settingsSearchFocused = false
         when (target) {
             Page.LIBRARY -> state.refreshLibrary()
             Page.HOME -> if (state.ui.value.homeSections.isEmpty() && !state.ui.value.homeLoading) state.refreshHome()
@@ -541,6 +590,9 @@ class Tui(
                     KeyAction.PLAY_PAUSE -> state.togglePlayback()
                     KeyAction.NEXT -> state.next()
                     KeyAction.PREVIOUS -> state.previous()
+                    KeyAction.STOP -> stop()
+                    KeyAction.STOP_AFTER -> toggleStopAfter()
+                    KeyAction.BOOSTER -> overlays.addLast(VolumePanel(booster = true))
                     KeyAction.VOLUME_UP -> state.setVolume((playback.volume + .05f).coerceAtMost(1f))
                     KeyAction.VOLUME_DOWN -> state.setVolume((playback.volume - .05f).coerceAtLeast(0f))
                     KeyAction.MUTE -> state.toggleMute()
@@ -594,6 +646,19 @@ class Tui(
         else Settings.SPEEDS.lastOrNull { it < now - .01f } ?: Settings.SPEEDS.first()
         state.setPlaybackSpeed(next)
         if (say) toast("Speed: ${Settings.speedName(next)}")
+    }
+
+    /** The Stop button: back to the start of the song, paused, the queue as it was. */
+    internal fun stop() {
+        if (state.playback.value.track == null && state.queue.state.value.current == null) return toast("Nothing is playing", Row.Tone.QUIET)
+        state.stop()
+        toast("Stopped: play starts it from the top")
+    }
+
+    /** Stop after this song, on or off, and said either way. */
+    internal fun toggleStopAfter() {
+        state.toggleStopAfterCurrent()
+        toast(if (state.stopAfterCurrent.value) "Stops after this song" else "Plays on after this song")
     }
 
     /** Settings' "Check for updates": the same as the daily check, asked for, so it always answers. */

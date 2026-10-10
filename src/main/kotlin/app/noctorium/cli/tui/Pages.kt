@@ -26,6 +26,14 @@ object Pages {
         val p = tui.palette
         when (tui.page) {
             Page.NOW_PLAYING -> NowPlaying.draw(tui, canvas, x, y, w, h)
+            Page.SETTINGS -> if (tui.keysOpen) list(tui, canvas, x, y, w, h) else {
+                // The settings search's box over the list, which shows what it finds while there is something typed.
+                title(tui, canvas, x, y, w, heading(tui), subtitle(tui))
+                SettingsIndex.field(tui, canvas, x + 2, y + 3, w - 4)
+                val top = LIST_TOP + 2
+                if (p.skinned) Skin.well(canvas, p, x + 1, y + top, w - 2, h - top)
+                tui.listView.draw(canvas, rows(tui), tui.list(key(tui)), x + 1, y + top, w - 2, h - top, focused = !tui.settingsSearchFocused)
+            }
             Page.SEARCH -> {
                 title(tui, canvas, x, y, w, "Search", subtitle(tui))
                 searchBox(tui, canvas, x + 2, y + 2, w - 4)
@@ -33,13 +41,20 @@ object Pages {
                 if (p.skinned) Skin.well(canvas, p, x + 1, y + 6, w - 2, h - 6, top = false)
                 tui.listView.draw(canvas, rows(tui), tui.list(key(tui)), x + 1, y + 6, w - 2, h - 6, focused = !tui.searchFocused)
             }
-            else -> {
-                title(tui, canvas, x, y, w, heading(tui), subtitle(tui))
-                if (p.skinned) Skin.well(canvas, p, x + 1, y + LIST_TOP, w - 2, h - LIST_TOP)
-                tui.listView.draw(canvas, rows(tui), tui.list(key(tui)), x + 1, y + LIST_TOP, w - 2, h - LIST_TOP)
-            }
+            else -> list(tui, canvas, x, y, w, h)
         }
     }
+
+    /** A page that is a title and a list under it. */
+    private fun list(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int, h: Int) {
+        val p = tui.palette
+        title(tui, canvas, x, y, w, heading(tui), subtitle(tui))
+        if (p.skinned) Skin.well(canvas, p, x + 1, y + LIST_TOP, w - 2, h - LIST_TOP)
+        tui.listView.draw(canvas, rows(tui), tui.list(key(tui)), x + 1, y + LIST_TOP, w - 2, h - LIST_TOP)
+    }
+
+    /** Whether the settings search is showing what it finds, rather than Settings itself. */
+    private fun searchingSettings(tui: Tui): Boolean = tui.page == Page.SETTINGS && !tui.keysOpen && tui.settingsQuery != null
 
     /** The page's title and what it is showing, or, in the Windows themes, a title bar saying the same. */
     private fun title(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int, title: String, subtitle: String?) {
@@ -69,7 +84,8 @@ object Pages {
         val k = tui::key
         return when (tui.page) {
             Page.HOME -> if (state.ui.value.homeLoading) "Loading…" else "From every service"
-            Page.SEARCH -> if (state.ui.value.searchLoading) "Searching…" else state.ui.value.searchMode.displayName
+            // Where the results are from: the bang's service while one is typed, the page's choice otherwise.
+            Page.SEARCH -> if (state.ui.value.searchLoading) "Searching…" else state.ui.value.activeSearchMode.displayName
             Page.LIBRARY -> {
                 val library = state.library.value
                 val local = library.openLocalPlaylist
@@ -104,11 +120,16 @@ object Pages {
                     "${k(KeyAction.CLEAR_UPCOMING)} clear next",
                     "${k(KeyAction.SAVE_QUEUE)} save",
                     "${k(KeyAction.CLEAR_QUEUE)} clear",
+                    "${k(KeyAction.CLEAR_ALL_BUT_CURRENT)} only this",
                 ).joinToString(" · ")
             }
             Page.DOWNLOADS -> "${state.downloadState.value.entries.size} kept · Enter play · ${k(KeyAction.REMOVE)} delete"
             Page.DEVICES -> "Noctorium Connect and the web player"
-            Page.SETTINGS -> if (tui.keysOpen) "Enter changes one · Delete puts it back · Esc back to Settings" else "← → or Enter to change"
+            Page.SETTINGS -> when {
+                tui.keysOpen -> "Enter changes one · Delete puts it back · Esc back to Settings"
+                tui.settingsQuery != null -> "Enter goes to it · Esc back to Settings"
+                else -> Settings.SECTIONS.joinToString(" · ") + "   ← → or Enter to change"
+            }
             Page.NOW_PLAYING -> null
         }
     }
@@ -116,6 +137,7 @@ object Pages {
     private fun key(tui: Tui): String = when {
         tui.page == Page.LIBRARY && tui.libraryOpen -> "library:" + (tui.state.library.value.openLocalPlaylist?.id ?: tui.state.library.value.openPlaylist?.playlistKey)
         tui.page == Page.SETTINGS && tui.keysOpen -> "SETTINGS:keys"
+        searchingSettings(tui) -> "SETTINGS:search"
         else -> tui.page.name
     }
 
@@ -126,7 +148,11 @@ object Pages {
         Page.QUEUE -> queueRows(tui)
         Page.DOWNLOADS -> downloadRows(tui)
         Page.DEVICES -> Settings.deviceRows(tui)
-        Page.SETTINGS -> if (tui.keysOpen) Settings.keyRows(tui) else Settings.rows(tui)
+        Page.SETTINGS -> when {
+            tui.keysOpen -> Settings.keyRows(tui)
+            tui.settingsQuery != null -> SettingsIndex.rows(tui, tui.settingsQuery.orEmpty())
+            else -> Settings.rows(tui)
+        }
         Page.NOW_PLAYING -> emptyList()
     }
 
@@ -161,6 +187,7 @@ object Pages {
         val results = ui.searchResults
         if (ui.searchQuery.isBlank()) {
             add(Row.Note("Type what you are looking for. Every service is searched at once; Tab changes which."))
+            add(Row.Note("Or one service for one search: !ytm, !sc, !sp, !bc or !vk before or after the words, !all for every one."))
             return@buildList
         }
         /*
@@ -207,7 +234,12 @@ object Pages {
                 add(Row.Action(artist.name, hint = artist.provider.displayName, run = { search(tui, artist.name) }))
             }
         }
-        if (isEmpty() && !ui.searchLoading) add(Row.Note("Nothing found for \"${ui.searchQuery}\"."))
+        // With a bang, the words without it, and where they were looked for.
+        val words = if (ui.searchBang != null) app.noctorium.core.SearchBangs.parse(ui.searchQuery).query else ui.searchQuery
+        val where = ui.searchBang?.let { " on ${it.mode.displayName}" }.orEmpty()
+        if (isEmpty() && !ui.searchLoading) {
+            add(Row.Note(if (words.isBlank()) "Type what to look for$where." else "Nothing found for \"$words\"$where."))
+        }
         if (ui.searchLoading && isEmpty()) add(Row.Note("Searching…"))
     }
 
@@ -291,6 +323,16 @@ object Pages {
         add(Row.Action("Clear what is next", hint = tui.key(KeyAction.CLEAR_UPCOMING), run = { clearUpcoming(tui) }))
         add(Row.Action("Save the queue as a playlist…", hint = tui.key(KeyAction.SAVE_QUEUE), run = { saveQueue(tui) }))
         add(Row.Action("Clear the queue", hint = tui.key(KeyAction.CLEAR_QUEUE), run = { clearQueue(tui) }))
+        add(Row.Action("Clear all but this song", hint = tui.key(KeyAction.CLEAR_ALL_BUT_CURRENT), run = { clearAllButCurrent(tui) }))
+        add(
+            Row.Action(
+                "Stop after this song",
+                value = if (tui.state.stopAfterCurrent.value) "On: nothing plays after it" else "Off",
+                tone = if (tui.state.stopAfterCurrent.value) Row.Tone.ACCENT else Row.Tone.NORMAL,
+                step = { tui.toggleStopAfter() },
+                detail = tui.key(KeyAction.STOP_AFTER),
+            ),
+        )
         if (current > 0) {
             add(Row.Gap)
             add(Row.Header("Played"))
@@ -364,6 +406,19 @@ object Pages {
         }
     }
 
+    /** The queue down to the song playing, alone; what came before it and what was to come both go, and it plays on. */
+    private fun clearAllButCurrent(tui: Tui) {
+        val queue = tui.state.queue.state.value
+        val current = queue.current ?: return tui.toast("Nothing is playing, so there is no song to keep", Row.Tone.QUIET)
+        val others = queue.tracks.size - 1
+        if (others == 0) return tui.toast("This song is all the queue has", Row.Tone.QUIET)
+        tui.overlays.addLast(
+            Overlay.Confirm("Clear all but this song?", if (others == 1) "One other song leaves the queue; ${current.title} plays on." else "The $others other songs leave the queue; ${current.title} plays on.") {
+                tui.state.clearAllButCurrent()
+            },
+        )
+    }
+
     private fun clearQueue(tui: Tui) =
         tui.overlays.addLast(Overlay.Confirm("Clear the queue?", "Playback stops too.") { tui.state.clearQueue() })
 
@@ -420,10 +475,11 @@ object Pages {
             if (focused) canvas.set(x + 4 + used, y + 1, "▏", p.accent, field, BOLD)
         }
         tui.clickTargets += Tui.ClickTarget(x, y, w, 3) { tui.searchFocused = true }
-        // The service chips, Tab cycles them.
+        bang(tui, canvas, x + w - 2, y + 1, field)
+        // The service chips, Tab cycles them; a bang typed lights its service's chip instead.
         var cx = x + 1
         SearchMode.entries.forEach { mode ->
-            val active = tui.state.ui.value.searchMode == mode
+            val active = tui.state.ui.value.activeSearchMode == mode
             val label = " ${mode.displayName} "
             val used = canvas.write(cx, y + 3, label, if (active) p.onAccent else p.subtext, if (active) p.accent else null, if (active) BOLD else 0)
             val target = mode
@@ -448,15 +504,29 @@ object Pages {
             if (focused) canvas.set(x + 4 + used, y + 1, "▏", Skin.text(p), null, BOLD)
         }
         tui.clickTargets += Tui.ClickTarget(x, y, w, 3) { tui.searchFocused = true }
+        bang(tui, canvas, x + w - 2, y + 1, Skin.window(p))
         var cx = x + 1
         SearchMode.entries.forEach { mode ->
-            val active = tui.state.ui.value.searchMode == mode
+            val active = tui.state.ui.value.activeSearchMode == mode
             Skin.radio(canvas, p, cx, y + 3, active)
             val used = 2 + canvas.write(cx + 2, y + 3, mode.displayName, Skin.text(p), null, if (active) BOLD else 0)
             val target = mode
             tui.clickTargets += Tui.ClickTarget(cx, y + 3, used, 1) { tui.state.setSearchMode(target) }
             cx += used + 3
         }
+    }
+
+    /**
+     * The bang in force, at the right end of the search box ending before [right]: "!sc → SoundCloud", so it is
+     * plain where this one search goes whatever the chips below say.
+     */
+    private fun bang(tui: Tui, canvas: Canvas, right: Int, y: Int, field: Rgb) {
+        val p = tui.palette
+        val ui = tui.state.ui.value
+        val bang = ui.searchBang ?: return
+        val label = " ${bang.typed} → ${bang.mode.displayName} "
+        if (p.skinned) canvas.writeRight(right, y, label, Skin.selectionText(p), Skin.selection(p), BOLD)
+        else canvas.writeRight(right, y, label, p.onAccent, p.accent, BOLD)
     }
 
     /** Keys while typing in the search box. True when the key was the box's. */
@@ -512,6 +582,12 @@ object Pages {
 
     fun handle(tui: Tui, input: Input): Boolean {
         if (tui.page == Page.NOW_PLAYING) return NowPlaying.handle(tui, input)
+        if (tui.page == Page.SETTINGS && !tui.keysOpen) {
+            // The settings search: its box has the keys while it is being typed in; the search key opens it.
+            if (tui.settingsSearchFocused && SettingsIndex.input(tui, input)) return true
+            if (input is Input.Text && tui.keys.matches(input.char, KeyAction.SEARCH)) { SettingsIndex.open(tui); return true }
+            if (tui.settingsQuery != null && input is Input.Key && input.key == Keys.ESCAPE) { SettingsIndex.close(tui); return true }
+        }
         val rows = rows(tui)
         val list = tui.list(key(tui))
         list.clamp(rows)
@@ -519,7 +595,15 @@ object Pages {
         val pageSize = (tui.screen.height - 10).coerceAtLeast(3)
         if (input is Input.Key) {
             when (input.key) {
-                Keys.UP -> { if (tui.page == Page.SEARCH && list.selected <= rows.indexOfFirst { it.selectable }) tui.searchFocused = true else list.move(rows, -1); return true }
+                Keys.UP -> {
+                    val first = list.selected <= rows.indexOfFirst { it.selectable }
+                    when {
+                        tui.page == Page.SEARCH && first -> tui.searchFocused = true
+                        searchingSettings(tui) && first -> tui.settingsSearchFocused = true
+                        else -> list.move(rows, -1)
+                    }
+                    return true
+                }
                 Keys.DOWN -> { list.move(rows, 1); return true }
                 Keys.PAGE_UP -> { list.move(rows, -pageSize); return true }
                 Keys.PAGE_DOWN -> { list.move(rows, pageSize); return true }
@@ -564,6 +648,7 @@ object Pages {
                     KeyAction.CLEAR_UPCOMING -> clearUpcoming(tui)
                     KeyAction.SAVE_QUEUE -> saveQueue(tui)
                     KeyAction.REFRESH_SUGGESTIONS -> refreshSuggestions(tui)
+                    KeyAction.CLEAR_ALL_BUT_CURRENT -> clearAllButCurrent(tui)
                     else -> return false
                 }
                 return true
@@ -601,7 +686,10 @@ object Pages {
     }
 
     fun scroll(tui: Tui, by: Int) {
-        if (tui.page == Page.NOW_PLAYING) { NowPlaying.scroll(by); return }
+        if (tui.page == Page.NOW_PLAYING) {
+            if (tui.preferences.nowPlaying == TuiNowPlaying.PLAYLIST) PlaylistLayout.scroll(tui, by) else NowPlaying.scroll(by)
+            return
+        }
         val rows = rows(tui)
         tui.list(key(tui)).move(rows, by)
     }
@@ -615,6 +703,7 @@ object Pages {
         if (!row.selectable) return
         val list = tui.list(key(tui))
         if (tui.page == Page.SEARCH) tui.searchFocused = false
+        if (tui.page == Page.SETTINGS) tui.settingsSearchFocused = false
         if (list.selected == index) activate(tui, row) else list.selected = index
     }
 }
@@ -630,6 +719,8 @@ object Tracks {
             row.inPlaylist != null -> state.playPlaylist(row.inPlaylist, startAt = row.track)
             row.inLocalPlaylist != null -> state.playLocalPlaylist(row.inLocalPlaylist, startAt = row.track)
             tui.page == Page.DOWNLOADS -> state.playDownloads(row.track)
+            // A song from Home plays as the listener chose: a radio started from it, or the rest of its shelf.
+            row.origin == PlaybackOrigin.HOME -> state.playFromHome(row.track, row.list)
             else -> state.play(row.track, row.origin, row.list)
         }
     }

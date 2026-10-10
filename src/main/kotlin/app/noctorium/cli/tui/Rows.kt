@@ -61,6 +61,8 @@ sealed interface Row {
         val remove: (() -> Unit)? = null,
         /** What the value means, said after it while the row is chosen: a layout's name alone says little. */
         val detail: String? = null,
+        /** A setting's own name, which the settings search finds it by and jumps to: see [SettingsIndex]. */
+        val id: String? = null,
     ) : Row
 
     enum class Tone { NORMAL, QUIET, GOOD, WARN, BAD, ACCENT }
@@ -162,7 +164,7 @@ fun formatTime(ms: Long?): String {
 }
 
 /** Draws a list of rows into a box and keeps hit-testing information for the mouse. */
-class ListView(private val palette: () -> Palette, private val state: AppState) {
+class ListView(private val palette: () -> Palette, private val state: AppState, private val glyphs: () -> Glyphs = { Glyphs.STANDARD }) {
     /** Which row each screen line showed last frame, for clicks. */
     val lines = mutableMapOf<Int, Int>()
     var top = 0
@@ -262,7 +264,8 @@ class ListView(private val palette: () -> Palette, private val state: AppState) 
         // Autoplay's songs are offered rather than chosen, and look it.
         val titleColour = if (playing) p.accent else if (row.suggestion != null) p.subtext else p.text
         val artistColour = if (row.suggestion != null) p.faint else p.subtext
-        canvas.write(x + 1, y, if (playing) "▶" else " ", p.accent, background, BOLD)
+        val g = glyphs()
+        canvas.write(x + 1, y, if (playing) g.playing else " ", p.accent, background, BOLD)
         val numberWidth = if (row.number != null) 4 else 0
         row.number?.let { canvas.write(x + 3, y, it.toString().padStart(3), p.faint, background) }
         val right = 16
@@ -278,7 +281,7 @@ class ListView(private val palette: () -> Palette, private val state: AppState) 
         val rx = x + w - right
         canvas.write(rx, y, track.provider.badge(), p.badgeColour(track.provider), background, BOLD)
         canvas.writeRight(rx + 12, y, formatTime(track.durationMs), p.faint, background)
-        if (liked) canvas.write(rx + 13, y, "♥", p.accent, background)
+        if (liked) canvas.write(rx + 13, y, g.liked, p.accent, background, max = 2)
     }
 
     /** The row index at a screen line, for a click. */

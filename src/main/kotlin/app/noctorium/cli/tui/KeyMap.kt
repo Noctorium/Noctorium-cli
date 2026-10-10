@@ -33,9 +33,14 @@ enum class KeyAction(val label: String, val scope: KeyScope, val defaults: List<
     PLAY_PAUSE("Play or pause", KeyScope.EVERYWHERE, " "),
     NEXT("Next", KeyScope.EVERYWHERE, "n"),
     PREVIOUS("Previous", KeyScope.EVERYWHERE, "p"),
+    /** Winamp's and Audacious's key for it. */
+    STOP("Stop: back to the start", KeyScope.EVERYWHERE, "v"),
+    /** A full stop: the end, after this one. */
+    STOP_AFTER("Stop after this song", KeyScope.EVERYWHERE, "."),
     VOLUME_UP("Louder", KeyScope.EVERYWHERE, listOf("+", "=")),
     VOLUME_DOWN("Quieter", KeyScope.EVERYWHERE, listOf("-", "_")),
     MUTE("Mute", KeyScope.EVERYWHERE, "m"),
+    BOOSTER("The volume and the booster", KeyScope.EVERYWHERE, "b"),
     SHUFFLE("Shuffle", KeyScope.EVERYWHERE, "s"),
     REPEAT("Repeat", KeyScope.EVERYWHERE, "r"),
     SLOWER("Slower", KeyScope.EVERYWHERE, "<"),
@@ -79,6 +84,8 @@ enum class KeyAction(val label: String, val scope: KeyScope, val defaults: List<
     CLEAR_QUEUE("Clear the queue", KeyScope.QUEUE, "C"),
     SHUFFLE_UPCOMING("Shuffle what is next", KeyScope.QUEUE, "S"),
     CLEAR_UPCOMING("Clear what is next", KeyScope.QUEUE, "U"),
+    /** Only this song is left. */
+    CLEAR_ALL_BUT_CURRENT("Clear all but this song", KeyScope.QUEUE, "O"),
     SAVE_QUEUE("Save the queue as a playlist", KeyScope.QUEUE, "N"),
     REFRESH_SUGGESTIONS("Look again for autoplay's songs", KeyScope.QUEUE, "R"),
     DELETE_ALL_DOWNLOADS("Delete every download", KeyScope.DOWNLOADS, "X"),

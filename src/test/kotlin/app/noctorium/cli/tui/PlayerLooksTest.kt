@@ -1,0 +1,337 @@
+package app.noctorium.cli.tui
+
+import app.noctorium.cli.BandcampStandIn
+import app.noctorium.cli.BandcampStandIn.waitFor
+import app.noctorium.cli.CliParts
+import app.noctorium.domain.PlaybackOrigin
+import app.noctorium.domain.ProviderType
+import app.noctorium.domain.Track
+import app.noctorium.playback.AudioAnalysis
+import app.noctorium.playback.AudioAnalysisKind
+import app.noctorium.playback.PlaybackEngine
+import app.noctorium.playback.PlaybackState
+import app.noctorium.playback.PlaybackStatus
+import app.noctorium.playback.StreamFormat
+import app.noctorium.playback.VolumeBoost
+import app.noctorium.settings.HomePlay
+import app.noctorium.settings.QueueColumn
+import app.noctorium.settings.VisualiserStyle
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
+import java.util.concurrent.CopyOnWriteArrayList
+import kotlin.test.AfterTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+/**
+ * What came with the desktop-music-player look, in the terminal, drawn into frames and read back: the Toolbar, the
+ * booster on the volume, Stop and stop after this song, the Playlist layout with its table, visualiser and status
+ * bar, the symbols, Clear all but this song, a song from Home, and the bang in a search. Bandcamp's stand-in is the
+ * only service, and the player only pretends -- with a format and a visualiser feed of its own to report.
+ */
+class PlayerLooksTest {
+    /** A player that keeps what it was asked, says what it plays as, and has a visualiser feed while watched. */
+    private class StandIn : PlaybackEngine {
+        val mutable = MutableStateFlow(PlaybackState())
+        override val state: StateFlow<PlaybackState> = mutable
+        val calls = CopyOnWriteArrayList<String>()
+        val frames = MutableStateFlow<AudioAnalysis?>(null)
+        override val analysis: StateFlow<AudioAnalysis?> get() = frames
+        override val analysisKind: AudioAnalysisKind get() = AudioAnalysisKind.SPECTRUM
+        override suspend fun play(track: Track) = mutable.update {
+            it.copy(
+                status = PlaybackStatus.PLAYING, track = track, positionMs = 94_000, durationMs = track.durationMs ?: 240_000, volume = .5f,
+                format = StreamFormat("opus", 48_000, 2, 128_000),
+            )
+        }
+        override suspend fun pause() { calls += "pause"; mutable.update { it.copy(status = PlaybackStatus.PAUSED) } }
+        override suspend fun resume() = mutable.update { it.copy(status = PlaybackStatus.PLAYING) }
+        override suspend fun setVolume(value: Float) = mutable.update { it.copy(volume = value) }
+        override suspend fun setVolumeBoost(enabled: Boolean) = Unit
+        override suspend fun setVolumeBoostPercent(percent: Int) = mutable.update { it.copy(volumeBoostPercent = percent, volumeBoostEnabled = percent > 100) }
+        override suspend fun setMuted(muted: Boolean) = Unit
+        override suspend fun seekTo(positionMs: Long) { calls += "seek $positionMs"; mutable.update { it.copy(positionMs = positionMs) } }
+        override suspend fun stop() = mutable.update { PlaybackState() }
+        override fun close() = Unit
+    }
+
+    private val parts = CliParts()
+    private val player = StandIn()
+    private val state = BandcampStandIn.state(parts, player)
+    private val tui = Tui(state, parts, web = null)
+
+    @AfterTest
+    fun close() {
+        tui.preferences.playerBar = TuiPlayerBar.FULL
+        tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
+        tui.preferences.glyphs = TuiGlyphs.STANDARD
+        state.close()
+    }
+
+    private fun song(n: Int) = Track(
+        provider = ProviderType.BANDCAMP,
+        id = "70$n",
+        title = "Song $n",
+        artists = listOf(BandcampStandIn.artist),
+        durationMs = 200_000,
+        sourceUrl = "https://tycho.bandcamp.com/track/song-$n",
+    )
+
+    private val songs = listOf(BandcampStandIn.song) + (1..3).map(::song)
+
+    private fun playing() {
+        state.setAutoplay(false)
+        waitFor { !state.settings.value.preferences.autoplay }
+        state.play(BandcampStandIn.song, PlaybackOrigin.SEARCH, songs)
+        waitFor { state.playback.value.status == PlaybackStatus.PLAYING && state.queue.state.value.tracks.size == songs.size }
+    }
+
+    private fun lines(canvas: Canvas): List<String> = (0 until canvas.height).map { y ->
+        (0 until canvas.width).joinToString("") { x -> canvas.text[y * canvas.width + x] ?: " " }.trimEnd()
+    }
+
+    private fun render(w: Int = 150, h: Int = 42): Canvas {
+        tui.frame(w, h)
+        return tui.frame(w, h)
+    }
+
+    private fun click(canvas: Canvas, text: String, row: Int = canvas.height - 1) {
+        val at = lines(canvas)[row].indexOf(text)
+        assertTrue(at >= 0, "\"$text\" is not on row $row:\n" + lines(canvas).joinToString("\n"))
+        tui.press(Input.Mouse(MouseKind.PRESS, at, row))
+    }
+
+    @Test
+    fun `the toolbar is one row of buttons, the slider with its time, and repeat, shuffle and the volume`() {
+        playing()
+        tui.preferences.playerBar = TuiPlayerBar.TOOLBAR
+        tui.page = Page.QUEUE
+        val canvas = render()
+        val bar = lines(canvas).last()
+        listOf(" + ", "|◀", "▶ ", "▮▮", "■", "▶|", "1:34 / 4:43", "↻", "⇄", "vol").forEach { assertTrue(it in bar, "\"$it\" is not in the toolbar:\n$bar") }
+        assertTrue(bar.indexOf("■") < bar.indexOf("▶|") && bar.indexOf("▶|") < bar.indexOf("1:34 / 4:43") && bar.indexOf("1:34") < bar.indexOf("↻"), bar)
+        // The song is set into the bar's top edge.
+        assertTrue("Awake – Tycho" in lines(canvas)[canvas.height - 2], lines(canvas)[canvas.height - 2])
+        assertEquals(42 - 1 - 2 - 3, tui.listView.height, "The toolbar is two rows with its edge")
+
+        click(canvas, "▮▮")
+        waitFor { state.playback.value.status == PlaybackStatus.PAUSED }
+        player.calls.clear()
+        click(render(), "■")
+        waitFor { "seek 0" in player.calls }
+        click(render(), " + ")
+        assertEquals("Add to a playlist", assertIs<Overlay.Picker>(tui.overlays.last()).title)
+    }
+
+    @Test
+    fun `the booster's level shows on the volume while it is on, and nowhere it cannot be`() {
+        playing()
+        tui.page = Page.QUEUE
+        assertFalse("×" in lines(render()).takeLast(4).joinToString("\n"))
+        state.setVolumeBoostPercent(400)
+        waitFor { player.state.value.volumeBoostPercent == 400 }
+        assertTrue(lines(render()).takeLast(4).any { "50% ×4" in it }, lines(render()).takeLast(4).joinToString("\n"))
+        tui.preferences.playerBar = TuiPlayerBar.TOOLBAR
+        assertTrue("×4" in lines(render()).last())
+        tui.preferences.playerBar = TuiPlayerBar.TASKBAR
+        assertTrue("×4" in lines(render()).last())
+
+        // Where the music plays out of its reach the mark goes, and the panel says why.
+        player.mutable.update { it.copy(volumeBoostAvailable = false) }
+        waitFor { !state.playback.value.volumeBoostAvailable }
+        assertFalse("×4" in lines(render()).last())
+        tui.overlays.addLast(VolumePanel(booster = true))
+        val panel = lines(render()).joinToString("\n")
+        assertTrue("Not available here" in panel, panel)
+        tui.press(Input.Key(Keys.RIGHT))
+        assertEquals(400, state.settings.value.preferences.volumeBoostPercent, "unchanged where there is no booster")
+    }
+
+    @Test
+    fun `the volume panel steps the booster, sets it by number, and warns once it is loud`() {
+        playing()
+        tui.press(Input.Text("b"))
+        val panel = assertIs<VolumePanel>(tui.overlays.last())
+        assertTrue("Off" in lines(render()).joinToString("\n"))
+        tui.press(Input.Text(" "))
+        waitFor { state.settings.value.preferences.volumeBoostPercent == VolumeBoost.FIRST_PERCENT }
+        assertFalse(VolumeBoost.LOUD_WARNING in lines(render()).joinToString("\n"), "200% is not past the loud point")
+        tui.press(Input.Key(Keys.RIGHT))
+        waitFor { state.settings.value.preferences.volumeBoostPercent == 210 }
+        tui.press(Input.Key(Keys.RIGHT, shift = true))
+        waitFor { state.settings.value.preferences.volumeBoostPercent == 310 }
+        val loud = lines(render()).joinToString("\n")
+        assertTrue(VolumeBoost.LOUD_WARNING in loud && "310% ×3.1" in loud, loud)
+        tui.press(Input.Text("0"))
+        waitFor { state.settings.value.preferences.volumeBoostPercent == 1000 }
+        tui.press(Input.Key(Keys.RIGHT))
+        assertEquals(1000, state.settings.value.preferences.volumeBoostPercent)
+        tui.press(Input.Text("1"))
+        waitFor { state.settings.value.preferences.volumeBoostPercent == 100 }
+        tui.press(Input.Key(Keys.ESCAPE))
+        assertFalse(panel in tui.overlays)
+    }
+
+    @Test
+    fun `stop goes back to the start, and stop after this song is a key, a row on the queue and a mark on the bar`() {
+        playing()
+        player.calls.clear()
+        tui.press(Input.Text("v"))
+        waitFor { player.calls.toList() == listOf("pause", "seek 0") }
+
+        tui.press(Input.Text("."))
+        assertTrue(state.stopAfterCurrent.value)
+        tui.page = Page.QUEUE
+        val canvas = render()
+        assertTrue(lines(canvas).any { "Stop after this song" in it && "On: nothing plays after it" in it }, lines(canvas).joinToString("\n"))
+        assertTrue(lines(canvas).takeLast(4).any { "■ stops after this" in it }, lines(canvas).takeLast(4).joinToString("\n"))
+        tui.press(Input.Text("."))
+        assertFalse(state.stopAfterCurrent.value)
+    }
+
+    @Test
+    fun `clear all but this song leaves the song playing alone, after asking`() {
+        playing()
+        state.jumpToQueueItem(2)
+        waitFor { state.queue.state.value.currentIndex == 2 }
+        tui.page = Page.QUEUE
+        val canvas = render()
+        assertTrue(lines(canvas).any { "Clear all but this song" in it && it.endsWith(" O") }, lines(canvas).joinToString("\n"))
+        assertTrue("O only this" in lines(canvas).joinToString("\n"))
+        tui.press(Input.Text("O"))
+        assertIs<Overlay.Confirm>(tui.overlays.last())
+        tui.press(Input.Text("y"))
+        waitFor { state.queue.state.value.tracks.size == 1 }
+        assertEquals(songs[2], state.queue.state.value.current)
+    }
+
+    @Test
+    fun `a song from Home starts a radio from it, or plays on through its shelf, as chosen`() {
+        state.setAutoplay(true)
+        waitFor { state.settings.value.preferences.autoplay }
+        Tracks.play(tui, Row.Song(songs[1], songs, PlaybackOrigin.HOME))
+        waitFor { state.queue.state.value.current == songs[1] }
+        assertEquals(listOf(songs[1]), state.queue.state.value.tracks)
+
+        state.setHomePlay(HomePlay.SHELF)
+        waitFor { state.settings.value.preferences.homePlay == HomePlay.SHELF }
+        Tracks.play(tui, Row.Song(songs[2], songs, PlaybackOrigin.HOME))
+        waitFor { state.queue.state.value.current == songs[2] }
+        assertEquals(songs, state.queue.state.value.tracks)
+        state.setAutoplay(false)
+    }
+
+    @Test
+    fun `the Playlist layout is the queue as a table, an info bar with a visualiser, and a status bar`() {
+        playing()
+        tui.preferences.nowPlaying = TuiNowPlaying.PLAYLIST
+        tui.page = Page.NOW_PLAYING
+        player.frames.value = AudioAnalysis(bands = List(10) { .9f }, peaks = listOf(.8f, .7f), rms = listOf(.5f, .4f))
+        val canvas = render()
+        val page = lines(canvas)
+        val header = page.indexOfFirst { "Title" in it && "Artist" in it && "Album" in it && "Duration" in it }
+        assertTrue(header >= 0, page.joinToString("\n"))
+        assertTrue(page.any { "Queue (4)" in it }, page.joinToString("\n"))
+        val playingRow = page.indexOfFirst { "▶" in it && "Awake" in it && "Tycho" in it && "4:43" in it }
+        assertTrue(playingRow > header, page.joinToString("\n"))
+        // The status bar: what is playing, and how far into the whole queue -- 1:34 of 4:43 + 3 × 3:20 = 14:43.
+        val status = page[canvas.height - 1 - 4]
+        assertTrue("Opus, stereo, 48 kHz, 128 kbit/s" in status && "1:34 / 14:43" in status, status)
+
+        // The visualiser is measured while it is on screen, and drawn from the frames: full blocks near the top.
+        waitFor { player.frames.subscriptionCount.value > 0 }
+        waitFor { lines(render()).any { it.count { c -> c == '█' } >= 10 } }
+
+        // Columns as chosen; the title is kept whatever is asked.
+        state.setQueueColumns(listOf(QueueColumn.SERVICE, QueueColumn.NUMBER))
+        waitFor { state.settings.value.preferences.queueColumns == listOf(QueueColumn.TITLE, QueueColumn.SERVICE, QueueColumn.NUMBER) }
+        val chosen = lines(render())
+        assertTrue(chosen.any { "Title" in it && "Service" in it && "#" in it && "Artist" !in it }, chosen.joinToString("\n"))
+        assertTrue(chosen.any { "Bandcamp" in it && "Song 2" in it }, chosen.joinToString("\n"))
+
+        // The arrows choose, Enter plays.
+        tui.press(Input.Key(Keys.DOWN))
+        tui.press(Input.Key(Keys.DOWN))
+        tui.press(Input.Key(Keys.ENTER))
+        waitFor { state.queue.state.value.currentIndex == 2 }
+
+        // Off its page, nothing measures.
+        tui.page = Page.QUEUE
+        render()
+        waitFor { player.frames.subscriptionCount.value == 0 }
+
+        // Without the status bar and with the visualiser off, neither is drawn.
+        state.setStatusBar(false)
+        state.setVisualiser(VisualiserStyle.OFF)
+        waitFor { !state.settings.value.preferences.statusBar }
+        tui.page = Page.NOW_PLAYING
+        val plain = lines(render())
+        assertFalse(plain.any { "kbit/s" in it }, plain.joinToString("\n"))
+        assertEquals(0, player.frames.subscriptionCount.value)
+        state.setStatusBar(true)
+        state.setVisualiser(VisualiserStyle.BARS)
+        state.setQueueColumns(QueueColumn.DEFAULT)
+    }
+
+    @Test
+    fun `the level meter draws each channel where bars are not wanted`() {
+        playing()
+        state.setVisualiser(VisualiserStyle.LEVEL_METER)
+        waitFor { state.settings.value.preferences.visualiser == VisualiserStyle.LEVEL_METER }
+        tui.preferences.nowPlaying = TuiNowPlaying.PLAYLIST
+        tui.page = Page.NOW_PLAYING
+        player.frames.value = AudioAnalysis(peaks = listOf(.95f, .6f), rms = listOf(.7f, .5f))
+        render()
+        waitFor { player.frames.subscriptionCount.value > 0 }
+        fun meters(page: List<String>) = page.any { Regex("L [▏▎▍▌▋▊▉█]{5}").containsMatchIn(it) } && page.any { Regex("R [▏▎▍▌▋▊▉█]{5}").containsMatchIn(it) }
+        val until = System.currentTimeMillis() + 10_000
+        while (!meters(lines(render())) && System.currentTimeMillis() < until) Thread.sleep(50)
+        assertTrue(meters(lines(render())), lines(render()).joinToString("\n"))
+        state.setVisualiser(VisualiserStyle.BARS)
+    }
+
+    @Test
+    fun `the symbols are the terminal's own, plain ASCII, or a Nerd Font's`() {
+        playing()
+        tui.page = Page.QUEUE
+        assertTrue("|◀" in lines(render()).takeLast(4).joinToString("\n"))
+        tui.preferences.glyphs = TuiGlyphs.ASCII
+        val ascii = lines(render())
+        assertTrue(ascii.takeLast(4).any { "|<" in it && ">|" in it }, ascii.takeLast(4).joinToString("\n"))
+        assertTrue(ascii.any { it.startsWith("│ ~ Home") || " ~ Home" in it }, ascii.take(10).joinToString("\n"))
+        tui.preferences.glyphs = TuiGlyphs.NERD_FONT
+        val nerd = lines(render())
+        assertTrue(nerd.takeLast(4).any { "" in it && "" in it }, nerd.takeLast(4).joinToString("\n"))
+        assertTrue(nerd.any { " Home" in it }, nerd.take(10).joinToString("\n"))
+    }
+
+    @Test
+    fun `a bang in the search says where this one search goes`() {
+        tui.press(Input.Text("/"))
+        "!bc awake".forEach { tui.press(Input.Text(it.toString())) }
+        waitFor { state.ui.value.searchBang != null }
+        val page = lines(render()).joinToString("\n")
+        assertTrue("!bc → Bandcamp" in page, page)
+        assertEquals("Bandcamp", state.ui.value.activeSearchMode.displayName)
+    }
+
+    @Test
+    fun `after stop after this song, the bar is about the song play starts`() {
+        playing()
+        state.setStopAfterCurrent(true)
+        // The song ends: the player goes idle with it still set, and core moves the queue on without playing.
+        player.mutable.update { it.copy(status = PlaybackStatus.IDLE, positionMs = it.durationMs) }
+        waitFor { state.queue.state.value.currentIndex == 1 && !state.stopAfterCurrent.value }
+        tui.page = Page.QUEUE
+        val bar = lines(render()).takeLast(4).joinToString("\n")
+        assertTrue("Song 1" in bar && "Ready in the queue" in bar, bar)
+        assertNull(PlayerBar.shownTrack(tui))
+        assertNotNull(state.playback.value.track)
+    }
+}
