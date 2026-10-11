@@ -80,8 +80,13 @@ class WebCommands(
                 val track = command.track("track") ?: return "No track"
                 val list = command.tracks("list").ifEmpty { listOf(track) }
                 val origin = command.string("origin")?.let { runCatching { PlaybackOrigin.valueOf(it.uppercase()) }.getOrNull() } ?: PlaybackOrigin.SEARCH
-                // A song picked on Home plays the way the listener chose: autoplay after it, or the rest of its shelf.
-                if (origin == PlaybackOrigin.HOME) state.playFromHome(track, list) else state.play(track, origin, list)
+                // A song picked on Home or from a search plays the way the listener chose: autoplay after it, or the
+                // songs around it.
+                when (origin) {
+                    PlaybackOrigin.HOME -> state.playFromHome(track, list)
+                    PlaybackOrigin.SEARCH -> state.playFromSearch(track, list)
+                    else -> state.play(track, origin, list)
+                }
             }
             "playPlaylist" -> {
                 val playlist = playlist(command.string("key")) ?: return "That playlist is not open any more"

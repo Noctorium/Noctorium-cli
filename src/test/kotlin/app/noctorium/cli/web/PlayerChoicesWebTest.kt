@@ -206,7 +206,7 @@ class PlayerChoicesWebTest {
         assertEquals("STANDARD", before.string("iconSet"))
         assertEquals(IconSet.entries.map { it.name }, before.getValue("iconSets").jsonArray.map { it.jsonObject.string("name") })
         assertEquals("AUTOPLAY", before.string("homePlay"))
-        assertEquals(listOf("Autoplay after it", "The rest of its shelf"), before.getValue("homePlays").jsonArray.map { it.jsonObject.string("title") })
+        assertEquals(listOf("Autoplay after it", "The songs around it"), before.getValue("homePlays").jsonArray.map { it.jsonObject.string("title") })
         assertTrue("SLIDER" in before.getValue("progressBarStyles").jsonArray.map { it.jsonObject.string("name") })
 
         assertNull(run("visualiser", "name" to "LEVEL_METER"))
@@ -246,7 +246,7 @@ class PlayerChoicesWebTest {
     }
 
     @Test
-    fun `a song from Home plays the way the listener chose, and from anywhere else as it always did`() {
+    fun `a song from Home or a search plays the way the listener chose, and from anywhere else as it always did`() {
         val shelf = (1..3).map(::song)
         fun wired(tracks: List<Track>) = JsonArray(tracks.map { wireJson.encodeToJsonElement(it.wire()) })
 
@@ -255,9 +255,14 @@ class PlayerChoicesWebTest {
         waitFor { state.queue.state.value.current?.queueKey == shelf[0].queueKey }
         assertEquals(listOf(shelf[0].queueKey), state.queue.state.value.tracks.map { it.queueKey })
 
-        // Searched for, the list comes along as before.
+        // Searched for, the same: the song alone.
         assertNull(run("play", "track" to wireJson.encodeToJsonElement(shelf[1].wire()), "list" to wired(shelf), "origin" to "SEARCH"))
         waitFor { state.queue.state.value.current?.queueKey == shelf[1].queueKey }
+        assertEquals(listOf(shelf[1].queueKey), state.queue.state.value.tracks.map { it.queueKey })
+
+        // From a playlist, the list comes along as it always did.
+        assertNull(run("play", "track" to wireJson.encodeToJsonElement(shelf[0].wire()), "list" to wired(shelf), "origin" to "PLAYLIST"))
+        waitFor { state.queue.state.value.current?.queueKey == shelf[0].queueKey && state.queue.state.value.tracks.size == shelf.size }
         assertEquals(shelf.map { it.queueKey }, state.queue.state.value.tracks.map { it.queueKey })
 
         // The rest of its shelf, the old way.

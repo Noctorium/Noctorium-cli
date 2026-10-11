@@ -277,9 +277,9 @@ object Settings {
         // With autoplay off there is no radio to start, and core plays the rest of the shelf whatever this says.
         add(
             Row.Action(
-                "Playing a song from Home",
+                "Playing a song from Home or a search",
                 value = preferences.homePlay.displayName,
-                detail = if (preferences.autoplay) preferences.homePlay.description else "Autoplay is off, so the rest of the shelf plays",
+                detail = if (preferences.autoplay) preferences.homePlay.description else "Autoplay is off, so the songs around it play",
                 step = { by -> state.setHomePlay(cycle(HomePlay.entries, preferences.homePlay, by)) },
                 id = "homePlay",
             ),

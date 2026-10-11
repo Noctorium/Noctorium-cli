@@ -45,7 +45,7 @@ object SettingsIndex {
         entry("autoplay", "When the queue runs out", Settings.LISTENING, "Carry on with songs like the last, or stop.", "autoplay", "radio", "continue", "endless"),
         entry("autoplayFrom", "Autoplay draws from", Settings.LISTENING, "The service of the last song, or YouTube Music's radio.", "autoplay", "radio", "recommendations"),
         entry("avoidRecent", "Autoplay skips songs played lately", Settings.LISTENING, "Autoplay leaves out what you heard recently.", "autoplay", "repeats", "recently played"),
-        entry("homePlay", "Playing a song from Home", Settings.LISTENING, "Autoplay after it, or the rest of its shelf.", "home", "shelf", "radio", "autoplay"),
+        entry("homePlay", "Playing a song from Home or a search", Settings.LISTENING, "Autoplay after it, or the rest of its shelf or results.", "home", "search", "search results", "shelf", "radio", "autoplay"),
         entry("keepQueue", "Keep the queue between launches", Settings.LISTENING, "The queue is back where it was left.", "resume", "restore", "remember", "session"),
         entry("sleepFade", "Sleep timer fades out", Settings.LISTENING, "The sleep timer lowers the volume before it stops.", "sleep timer", "fade", "bedtime"),
         entry("hybridSearch", "Hybrid search asks", Settings.LISTENING, "Which services a search of all of them asks.", "search", "services", "all"),

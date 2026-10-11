@@ -1,6 +1,5 @@
 package app.noctorium.cli.tui
 
-import app.noctorium.domain.PlaybackOrigin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -29,7 +28,7 @@ object Startup {
             tui.toast("Nothing found for \"$text\"", Row.Tone.WARN)
             return
         }
-        state.play(found.first(), PlaybackOrigin.SEARCH, found)
+        state.playFromSearch(found.first(), found)
         tui.page = Page.NOW_PLAYING
         tui.invalidate()
     }

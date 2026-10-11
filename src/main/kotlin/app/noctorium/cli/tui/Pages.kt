@@ -719,8 +719,9 @@ object Tracks {
             row.inPlaylist != null -> state.playPlaylist(row.inPlaylist, startAt = row.track)
             row.inLocalPlaylist != null -> state.playLocalPlaylist(row.inLocalPlaylist, startAt = row.track)
             tui.page == Page.DOWNLOADS -> state.playDownloads(row.track)
-            // A song from Home plays as the listener chose: a radio started from it, or the rest of its shelf.
+            // A song from Home or a search plays as the listener chose: a radio started from it, or the songs around it.
             row.origin == PlaybackOrigin.HOME -> state.playFromHome(row.track, row.list)
+            row.origin == PlaybackOrigin.SEARCH -> state.playFromSearch(row.track, row.list)
             else -> state.play(row.track, row.origin, row.list)
         }
     }
