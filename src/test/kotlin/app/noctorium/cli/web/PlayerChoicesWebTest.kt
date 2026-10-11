@@ -124,6 +124,8 @@ class PlayerChoicesWebTest {
         assertNull(run("boostPercent", "percent" to 437))
         waitFor { preferences.volumeBoostPercent == 440 }
         waitFor { computer.state.value.volumeBoostPercent == 440 }
+        // The wire reads AppState's view of the player, which follows the player a moment behind.
+        waitFor { wire.playback().jsonObject.getValue("boost").jsonPrimitive.boolean }
         val after = wire.playback().jsonObject
         assertEquals(440, after.getValue("volumeBoostPercent").jsonPrimitive.int)
         assertTrue(after.getValue("boost").jsonPrimitive.boolean)
