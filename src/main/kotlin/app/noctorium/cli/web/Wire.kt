@@ -22,6 +22,7 @@ import app.noctorium.settings.HomePlay
 import app.noctorium.settings.IconSet
 import app.noctorium.settings.ProgressBarStyle
 import app.noctorium.settings.QueueColumn
+import app.noctorium.settings.ServiceBadgeStyle
 import app.noctorium.settings.ThemePreset
 import app.noctorium.settings.ThemeSkin
 import app.noctorium.settings.VisualiserStyle
@@ -411,6 +412,12 @@ data class WSettings(
     /** What a song played from Home plays after it, by HomePlay's name, and the choices. */
     val homePlay: String = HomePlay.AUTOPLAY.name,
     val homePlays: List<WChoice> = emptyList(),
+    /**
+     * The services' badges, by ServiceBadgeStyle's name -- MARKS, each service's own, or LETTERS, as they were -- and
+     * the choices. The page draws them; the terminal has only letters, and keeps them.
+     */
+    val serviceBadgeStyle: String = ServiceBadgeStyle.MARKS.name,
+    val serviceBadgeStyles: List<WChoice> = emptyList(),
     val lastfm: WService,
     val listenbrainz: WService,
     val scrobbles: Int,
@@ -646,6 +653,8 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
                 iconSets = IconSet.entries.map { WChoice(it.name, it.displayName, it.description) },
                 homePlay = p.homePlay.name,
                 homePlays = HomePlay.entries.map { WChoice(it.name, it.displayName, it.description) },
+                serviceBadgeStyle = p.serviceBadgeStyle.name,
+                serviceBadgeStyles = ServiceBadgeStyle.entries.map { WChoice(it.name, it.displayName, it.description) },
                 bandcamp = WBandcamp(
                     username = p.bandcampUsername,
                     fanName = s.bandcamp.fanName,

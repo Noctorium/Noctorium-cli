@@ -19,6 +19,7 @@ import app.noctorium.settings.HomePlay
 import app.noctorium.settings.IconSet
 import app.noctorium.settings.ProgressBarStyle
 import app.noctorium.settings.QueueColumn
+import app.noctorium.settings.ServiceBadgeStyle
 import app.noctorium.settings.ThemePreset
 import app.noctorium.settings.TimeDisplay
 import app.noctorium.settings.VisualiserStyle
@@ -235,6 +236,7 @@ class WebCommands(
             "statusBar" -> state.setStatusBar(command.bool("on") ?: return "On or off?")
             "iconSet" -> state.setIconSet(choice<IconSet>(command.string("name")) ?: return "No such icons")
             "homePlay" -> state.setHomePlay(choice<HomePlay>(command.string("name")) ?: return "No such choice")
+            "serviceBadgeStyle" -> state.setServiceBadgeStyle(choice<ServiceBadgeStyle>(command.string("name")) ?: return "No such badges")
             "timeDisplay" -> state.setTimeDisplay(TimeDisplay.valueOf(command.string("name") ?: return "No choice"))
             "skipNonMusic" -> state.setSkipNonMusic(command.bool("on") ?: return "On or off?")
             "youtubeHistory" -> state.setYouTubeHistory(command.bool("on") ?: return "On or off?")

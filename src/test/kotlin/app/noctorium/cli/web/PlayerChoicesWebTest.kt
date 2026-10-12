@@ -16,6 +16,7 @@ import app.noctorium.playback.StreamFormat
 import app.noctorium.settings.HomePlay
 import app.noctorium.settings.IconSet
 import app.noctorium.settings.QueueColumn
+import app.noctorium.settings.ServiceBadgeStyle
 import app.noctorium.settings.VisualiserStyle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -209,6 +210,8 @@ class PlayerChoicesWebTest {
         assertEquals(IconSet.entries.map { it.name }, before.getValue("iconSets").jsonArray.map { it.jsonObject.string("name") })
         assertEquals("AUTOPLAY", before.string("homePlay"))
         assertEquals(listOf("Autoplay after it", "The songs around it"), before.getValue("homePlays").jsonArray.map { it.jsonObject.string("title") })
+        assertEquals("MARKS", before.string("serviceBadgeStyle"))
+        assertEquals(listOf("Marks", "Letters"), before.getValue("serviceBadgeStyles").jsonArray.map { it.jsonObject.string("title") })
         assertTrue("SLIDER" in before.getValue("progressBarStyles").jsonArray.map { it.jsonObject.string("name") })
 
         assertNull(run("visualiser", "name" to "LEVEL_METER"))
@@ -217,14 +220,17 @@ class PlayerChoicesWebTest {
         assertNull(run("statusBar", "on" to false))
         assertNull(run("iconSet", "name" to "LINE"))
         assertNull(run("homePlay", "name" to "SHELF"))
+        assertNull(run("serviceBadgeStyle", "name" to "LETTERS"))
         assertEquals("No such visualiser", run("visualiser", "name" to "SPARKLES"))
         assertEquals("No such icons", run("iconSet", "name" to "EMOJI"))
         assertEquals("No such choice", run("homePlay", "name" to "SOMEWHERE"))
+        assertEquals("No such badges", run("serviceBadgeStyle", "name" to "STICKERS"))
         assertEquals("On or off?", run("statusBar"))
         assertEquals("No columns", run("queueColumns"))
         waitFor {
             preferences.visualiser == VisualiserStyle.LEVEL_METER && !preferences.statusBar && preferences.iconSet == IconSet.LINE &&
-                preferences.homePlay == HomePlay.SHELF && preferences.queueColumns.size == 3
+                preferences.homePlay == HomePlay.SHELF && preferences.queueColumns.size == 3 &&
+                preferences.serviceBadgeStyle == ServiceBadgeStyle.LETTERS
         }
 
         val after = wire.settings().jsonObject
@@ -233,6 +239,7 @@ class PlayerChoicesWebTest {
         assertFalse(after.getValue("statusBar").jsonPrimitive.boolean)
         assertEquals("LINE", after.string("iconSet"))
         assertEquals("SHELF", after.string("homePlay"))
+        assertEquals("LETTERS", after.string("serviceBadgeStyle"))
     }
 
     @Test
