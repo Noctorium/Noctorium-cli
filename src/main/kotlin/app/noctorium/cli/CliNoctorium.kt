@@ -61,7 +61,8 @@ fun cliAppState(parts: CliParts, engine: PlaybackEngine, interactive: Boolean = 
     accountProbe = AccountProbe(),
     discordPresence = DiscordPresenceManager(),
     deviceName = { deviceName() },
-    deviceKind = DeviceKind.DESKTOP,
+    // Shown as a terminal in every other device's Connect tab, not taken for one more computer.
+    deviceKind = DeviceKind.TERMINAL,
     updateInstaller = parts.updates.installer,
     checkForUpdatesAtLaunch = false,
     refreshAtLaunch = interactive,
