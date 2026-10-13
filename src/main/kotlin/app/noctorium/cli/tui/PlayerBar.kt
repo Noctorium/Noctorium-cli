@@ -4,8 +4,10 @@ import app.noctorium.domain.Track
 import app.noctorium.playback.PlaybackStatus
 import app.noctorium.playback.RepeatMode
 import app.noctorium.playback.VolumeBoost
+import app.noctorium.settings.PlayerButton
 import app.noctorium.settings.ThemeSkin
 import app.noctorium.settings.TimeDisplay
+import app.noctorium.settings.showsPlayerButton
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -13,7 +15,7 @@ import java.time.format.FormatStyle
 /**
  * The bar along the foot of the screen, laid out as the listener chose in Settings (see [TuiPlayerBar]): the
  * full bar with the cover, the track, the controls over the seek bar and the volume; one compact row; a
- * desktop's taskbar; or a desktop music player's toolbar.
+ * desktop's taskbar; or a desktop music player's toolbar, as it was or as Toolbar 2.
  *
  * The seek bar is drawn by [SeekBars], in whichever style is chosen -- one setting across every Noctorium.
  * Clicking it seeks, and every control does the same wherever a layout puts it.
@@ -22,7 +24,7 @@ object PlayerBar {
     /** How many rows the bar takes from a screen [screenHeight] tall: its top edge, then what it holds. */
     fun height(tui: Tui, screenHeight: Int): Int = when (tui.preferences.playerBar) {
         TuiPlayerBar.FULL -> if (screenHeight >= 20) 4 else 2
-        TuiPlayerBar.COMPACT, TuiPlayerBar.TASKBAR, TuiPlayerBar.TOOLBAR -> 2
+        TuiPlayerBar.COMPACT, TuiPlayerBar.TASKBAR, TuiPlayerBar.TOOLBAR, TuiPlayerBar.TOOLBAR_2 -> 2
     }
 
     fun draw(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int, h: Int, cover: Art.Pixels?) {
@@ -31,6 +33,7 @@ object PlayerBar {
             TuiPlayerBar.COMPACT -> compact(tui, canvas, x, y, w)
             TuiPlayerBar.TASKBAR -> taskbar(tui, canvas, x, y, w)
             TuiPlayerBar.TOOLBAR -> toolbar(tui, canvas, x, y, w)
+            TuiPlayerBar.TOOLBAR_2 -> toolbar2(tui, canvas, x, y, w)
         }
     }
 
@@ -293,24 +296,14 @@ object PlayerBar {
         val state = tui.state
         val playback = state.playback.value
         val queue = state.queue.state.value
-        val preferences = state.settings.value.preferences
         val g = tui.glyphs
         val bg = barBackground(p)
         val row = y + 1
         canvas.fill(x, y, w, 2, bg)
         edge(canvas, p, x, y, w, bg)
 
-        // The song, set into the edge; or the one waiting, or nothing.
-        val track = shownTrack(tui)
-        val waiting = queue.current
-        val label = when {
-            track != null && playback.status == PlaybackStatus.RESOLVING -> "${track.title} – finding the audio…"
-            track != null && playback.status == PlaybackStatus.ERROR -> "${track.title} – ${playback.errorMessage ?: "could not play this"}"
-            track != null -> listOfNotNull(track.title, track.artistLine.takeIf(String::isNotBlank)).joinToString(" – ")
-            waiting != null -> "${waiting.title} – ready: ${tui.key(KeyAction.PLAY_PAUSE)} plays it"
-            else -> null
-        }
         // The buttons, from the left.
+        val track = shownTrack(tui)
         val playing = playback.status == PlaybackStatus.PLAYING
         val paused = playback.status == PlaybackStatus.PAUSED
         val gap = if (w >= 110) 1 else 0
@@ -333,49 +326,233 @@ object PlayerBar {
         button(g.stop, pressed = state.stopAfterCurrent.value, dim = track == null) { tui.stop() }
         button(g.next, pressed = false, dim = !queue.hasNext) { state.next() }
         val seekX = cx + 1
-        // In the Windows themes the buttons stand up out of the bar, lit along their tops in the edge's row, and the
-        // song is written after them; elsewhere it is set into the edge from the left, over the buttons.
-        if (p.skinned) {
-            val lit = if (p.skin == ThemeSkin.WINDOWS_XP) Xp.BUTTON_EDGE else p.w98.highlight
-            drawn.forEach { cells -> cells.forEach { c -> canvas.set(c, y, Skin.FOOT, lit, bg) } }
-        }
 
         // From the right: the volume, its booster's mark, then repeat and shuffle before them.
-        val mark = boostMark(tui)
-        val volumeW = Canvas.displayWidth(g.volume) + 1 + VOLUME_BARS + (mark?.let { Canvas.displayWidth(it) + 1 } ?: 0)
-        val volumeX = x + w - 1 - volumeW
-        canvas.write(volumeX, row, g.volume, if (p.skinned) Skin.text(p) else p.subtext, bg, max = 3)
-        tui.clickTargets += Tui.ClickTarget(volumeX, row, Canvas.displayWidth(g.volume), 1) { tui.overlays.addLast(VolumePanel()) }
-        val barsX = volumeX + Canvas.displayWidth(g.volume) + 1
-        volume(tui, canvas, barsX, row, bg, p.accent, if (p.skinned) mix(Skin.text(p), bg, .6f) else p.faint)
-        mark?.let { canvas.write(barsX + VOLUME_BARS + 1, row, it, boostColour(tui), bg, BOLD) }
-        val toolW = toolButtonWidth(p, narrow)
+        val volumeX = toolVolume(tui, canvas, x + w - 1, row, bg)
+        val toolW = toolWidth(p, g.shuffle, narrow)
         val shuffleX = volumeX - 2 - toolW
         val repeatX = shuffleX - gap - toolW
         toolButton(canvas, p, repeatX, row, if (queue.repeatMode == RepeatMode.ONE) g.repeatOne else g.repeat, queue.repeatMode != RepeatMode.OFF, false, bg, narrow)
         tui.clickTargets += Tui.ClickTarget(repeatX, row, toolW, 1) { state.cycleRepeat() }
         toolButton(canvas, p, shuffleX, row, g.shuffle, queue.shuffleEnabled, false, bg, narrow)
         tui.clickTargets += Tui.ClickTarget(shuffleX, row, toolW, 1) { state.toggleShuffle() }
-        if (p.skinned) {
-            val lit = if (p.skin == ThemeSkin.WINDOWS_XP) Xp.BUTTON_EDGE else p.w98.highlight
-            for (c in repeatX until repeatX + toolW) canvas.set(c, y, Skin.FOOT, lit, bg)
-            for (c in shuffleX until shuffleX + toolW) canvas.set(c, y, Skin.FOOT, lit, bg)
-        }
+        drawn += repeatX until repeatX + toolW
+        drawn += shuffleX until shuffleX + toolW
+        raise(canvas, p, y, drawn, bg)
 
-        // The slider and the time, "1:34 / 4:43", across what is left between the two.
-        val shown = track ?: waiting
+        // The slider and the time across what is left between the two, and the song in the edge, up to repeat.
+        sliderAndTime(tui, canvas, seekX, row, repeatX - 2, bg)
+        songInEdge(tui, canvas, x, y, w, seekX, repeatX - 1, bg)
+    }
+
+    /**
+     * Toolbar 2: the toolbar asked for again with play and pause one button and no add button, and the bar's other
+     * buttons after the slider, in groups -- like, lyrics and the queue; repeat and shuffle; the sleep timer, Devices
+     * (where Connect is), the speed and the volume -- each doing what its key does. Which of them it carries is core's
+     * player-bar buttons setting, as the desktop's bar keeps it: Stop joins the transport once asked for, and any of
+     * the rest can be put away. As the terminal narrows they give way in turn, keeping any showing something under
+     * way ([toolbar2Buttons]); the transport, the slider's time and the volume stay.
+     */
+    private fun toolbar2(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int) {
+        val p = tui.palette
+        val state = tui.state
+        val queue = state.queue.state.value
+        val g = tui.glyphs
+        val bg = barBackground(p)
+        val row = y + 1
+        canvas.fill(x, y, w, 2, bg)
+        edge(canvas, p, x, y, w, bg)
+        val track = shownTrack(tui)
+        val gap = if (w >= 110) 1 else 0
+        val narrow = w < 100
+        val raised = mutableListOf<IntRange>()
+        fun button(at: Int, glyph: String, pressed: Boolean, dim: Boolean, action: () -> Unit): Int {
+            val used = toolButton(canvas, p, at, row, glyph, pressed, dim, bg, narrow)
+            raised += at until at + used
+            tui.clickTargets += Tui.ClickTarget(at, row, used, 1) { action() }
+            return used
+        }
+        val inUse = toolbar2InUse(tui)
+        val desktop = state.settings.value.preferences.desktop
+        val wanted = PlayerButton.entries.filter { desktop.showsPlayerButton(it) }.toSet() + inUse
+
+        // The transport, from the left: previous; play or pause, one button saying what it will do, as the other
+        // bars' play button does; Stop, where it was asked for; and next.
+        var cx = x + 1
+        cx += button(cx, g.previous, pressed = false, dim = false) { state.previous() } + gap
+        cx += button(cx, playSymbol(tui), pressed = false, dim = false) { state.togglePlayback() } + gap
+        if (PlayerButton.STOP in wanted) cx += button(cx, g.stop, pressed = state.stopAfterCurrent.value, dim = track == null) { tui.stop() } + gap
+        cx += button(cx, g.next, pressed = false, dim = !queue.hasNext) { state.next() } + gap
+        val seekX = cx + 1
+
+        // After the slider, the groups, as many of their buttons as leave the slider room. They are parted by a
+        // faint rule, as the desktop's toolbar parts them, or in the Windows themes by the room between the slabs.
+        val tools = TOOLBAR_2_GROUPS.flatten().filter { it != PlayerButton.VOLUME }.associateWith { toolbar2Tool(tui, it) }
+        val apart = if (p.skinned) 2 else 3
+        fun width(button: PlayerButton) = if (button == PlayerButton.VOLUME) toolVolumeWidth(tui) else toolWidth(p, tools.getValue(button).label, narrow)
+        fun groups(drawn: Set<PlayerButton>) = TOOLBAR_2_GROUPS.map { group -> group.filter { it in drawn } }.filter { it.isNotEmpty() }
+        fun groupsWidth(drawn: Set<PlayerButton>) = groups(drawn).sumOf { group -> group.sumOf(::width) + gap * (group.size - 1) + apart } - apart
+        val timeW = Canvas.displayWidth(toolbarTime(tui))
+        val drawn = toolbar2Buttons(wanted, inUse) { candidate -> x + w - 1 - groupsWidth(candidate) - 2 - timeW - 1 - seekX }
+
+        // Drawn from the right, the volume last.
+        var right = x + w - 1
+        groups(drawn).asReversed().forEachIndexed { n, group ->
+            if (n > 0) {
+                right -= apart
+                if (!p.skinned) canvas.set(right + 1, row, "│", p.line, bg)
+            }
+            group.asReversed().forEachIndexed { i, b ->
+                if (i > 0) right -= gap
+                right -= width(b)
+                if (b == PlayerButton.VOLUME) toolVolume(tui, canvas, right + width(b), row, bg)
+                else tools.getValue(b).let { tool -> button(right, tool.label, tool.pressed, tool.dim, tool.action) }
+            }
+        }
+        raise(canvas, p, y, raised, bg)
+        sliderAndTime(tui, canvas, seekX, row, right - 2, bg)
+        songInEdge(tui, canvas, x, y, w, seekX, right - 1, bg)
+    }
+
+    /** Toolbar 2's buttons after the slider, in their groups and their order: the desktop's, as Base names them. */
+    internal val TOOLBAR_2_GROUPS: List<List<PlayerButton>> = listOf(
+        listOf(PlayerButton.LIKE, PlayerButton.LYRICS, PlayerButton.QUEUE),
+        listOf(PlayerButton.REPEAT, PlayerButton.SHUFFLE),
+        listOf(PlayerButton.SLEEP_TIMER, PlayerButton.DEVICES, PlayerButton.SPEED, PlayerButton.VOLUME),
+    )
+
+    /** Every button Toolbar 2 can have, for Settings to tick: those after the slider, then Stop, after next. */
+    internal val TOOLBAR_2_BUTTONS: List<PlayerButton> = TOOLBAR_2_GROUPS.flatten() + PlayerButton.STOP
+
+    /**
+     * What gives way on Toolbar 2 as the terminal narrows, in turn: lyrics and the queue, which only lead to other
+     * pages; then repeat, shuffle, the sleep timer and the speed, as on the desktop; then, where even that is not
+     * room enough, like and Devices.
+     */
+    private val TOOLBAR_2_GIVES_WAY: List<Set<PlayerButton>> = listOf(
+        setOf(PlayerButton.LYRICS, PlayerButton.QUEUE),
+        setOf(PlayerButton.REPEAT, PlayerButton.SHUFFLE, PlayerButton.SLEEP_TIMER, PlayerButton.SPEED),
+        setOf(PlayerButton.LIKE, PlayerButton.DEVICES),
+    )
+
+    /** The fewest cells Toolbar 2's slider is left before its buttons give way. */
+    internal const val SLIDER_ROOM = 20
+
+    /**
+     * Which of the [wanted] buttons Toolbar 2 draws: all of them while the slider has [SLIDER_ROOM], as [sliderRoom]
+     * measures it for a set of them, and otherwise fewer, giving way in turn -- but never one [inUse], a sleep timer
+     * counting down or the music playing elsewhere, which is not to be lost sight of for want of room.
+     */
+    internal fun toolbar2Buttons(wanted: Set<PlayerButton>, inUse: Set<PlayerButton>, sliderRoom: (Set<PlayerButton>) -> Int): Set<PlayerButton> {
+        var drawn = wanted
+        for (step in TOOLBAR_2_GIVES_WAY) {
+            if (sliderRoom(drawn) >= SLIDER_ROOM) break
+            drawn = drawn - (step - inUse)
+        }
+        return drawn
+    }
+
+    /** The buttons showing something under way: a sleep timer set, the music on another device, a song played faster or slower. */
+    internal fun toolbar2InUse(tui: Tui): Set<PlayerButton> = buildSet {
+        val state = tui.state
+        if (state.sleepTimer.value != null) add(PlayerButton.SLEEP_TIMER)
+        val connect = state.connect.value
+        if (connect.target != null || connect.controlledBy != null) add(PlayerButton.DEVICES)
+        if (state.settings.value.preferences.playbackSpeed != 1f) add(PlayerButton.SPEED)
+    }
+
+    /** One of Toolbar 2's buttons after the slider: what it shows, whether it is pressed in or has nothing to act on, and what it does. */
+    private class Tool(val label: String, val pressed: Boolean = false, val dim: Boolean = false, val action: () -> Unit)
+
+    private fun toolbar2Tool(tui: Tui, button: PlayerButton): Tool {
+        val state = tui.state
+        val g = tui.glyphs
+        val queue = state.queue.state.value
+        return when (button) {
+            PlayerButton.LIKE -> {
+                val track = shownTrack(tui)
+                val likes = state.likes.value
+                val liked = track != null && likes.isLiked(track)
+                // Dim where the song's service cannot be liked from here; pressing it still says why, as the key does.
+                Tool(if (liked) g.liked else g.like, pressed = liked, dim = track == null || !likes.supports(track)) { track?.let(tui::like) }
+            }
+            PlayerButton.LYRICS -> Tool(g.lyrics) { tui.go(Page.NOW_PLAYING) }
+            PlayerButton.QUEUE -> Tool(g.page(Page.QUEUE)) { tui.go(Page.QUEUE) }
+            PlayerButton.REPEAT -> Tool(if (queue.repeatMode == RepeatMode.ONE) g.repeatOne else g.repeat, pressed = queue.repeatMode != RepeatMode.OFF) { state.cycleRepeat() }
+            PlayerButton.SHUFFLE -> Tool(g.shuffle, pressed = queue.shuffleEnabled) { state.toggleShuffle() }
+            PlayerButton.SLEEP_TIMER -> Tool(g.sleep, pressed = state.sleepTimer.value != null) { tui.overlays.addLast(Overlays.sleepTimer(tui)) }
+            PlayerButton.DEVICES -> {
+                val connect = state.connect.value
+                Tool(g.devices, pressed = connect.target != null || connect.controlledBy != null) { tui.go(Page.DEVICES) }
+            }
+            // The speed itself, "1.25×", pressed in while it is not the song's own.
+            PlayerButton.SPEED -> {
+                val speed = state.settings.value.preferences.playbackSpeed
+                Tool(Settings.speedName(speed), pressed = speed != 1f) { tui.overlays.addLast(Overlays.speed(tui)) }
+            }
+            PlayerButton.VOLUME, PlayerButton.STOP -> error("$button is drawn apart")
+        }
+    }
+
+    /** In the Windows themes the toolbars' buttons stand up out of the bar, lit along their tops in the edge's row. */
+    private fun raise(canvas: Canvas, p: Palette, y: Int, cells: List<IntRange>, bg: Rgb) {
+        if (!p.skinned) return
+        val lit = if (p.skin == ThemeSkin.WINDOWS_XP) Xp.BUTTON_EDGE else p.w98.highlight
+        cells.forEach { range -> range.forEach { c -> canvas.set(c, y, Skin.FOOT, lit, bg) } }
+    }
+
+    /** How wide the toolbars' volume is: its label, the bars, and the booster's mark while it is on. */
+    private fun toolVolumeWidth(tui: Tui): Int =
+        Canvas.displayWidth(tui.glyphs.volume) + 1 + VOLUME_BARS + (boostMark(tui)?.let { Canvas.displayWidth(it) + 1 } ?: 0)
+
+    /**
+     * The toolbars' volume, ending before [right]: its label, which opens the volume panel; the bars, which set it;
+     * and the booster's mark while it is on. Returns where it begins.
+     */
+    private fun toolVolume(tui: Tui, canvas: Canvas, right: Int, row: Int, bg: Rgb): Int {
+        val p = tui.palette
+        val g = tui.glyphs
+        val volumeX = right - toolVolumeWidth(tui)
+        canvas.write(volumeX, row, g.volume, if (p.skinned) Skin.text(p) else p.subtext, bg, max = 3)
+        tui.clickTargets += Tui.ClickTarget(volumeX, row, Canvas.displayWidth(g.volume), 1) { tui.overlays.addLast(VolumePanel()) }
+        val barsX = volumeX + Canvas.displayWidth(g.volume) + 1
+        volume(tui, canvas, barsX, row, bg, p.accent, if (p.skinned) mix(Skin.text(p), bg, .6f) else p.faint)
+        boostMark(tui)?.let { canvas.write(barsX + VOLUME_BARS + 1, row, it, boostColour(tui), bg, BOLD) }
+        return volumeX
+    }
+
+    /** The toolbars' time, "1:34 / 4:43": the song's, or none yet for the one waiting, its length or the time left. */
+    private fun toolbarTime(tui: Tui): String {
+        val playback = tui.state.playback.value
+        val track = shownTrack(tui)
+        val shown = track ?: tui.state.queue.state.value.current
         val position = if (track != null) playback.positionMs else 0L
-        val duration = if (track != null) playback.durationMs else waiting?.durationMs ?: 0L
-        val total = if (preferences.timeDisplay == TimeDisplay.REMAINING && duration > 0) "-" + formatTime((duration - position).coerceAtLeast(0))
+        val duration = if (track != null) playback.durationMs else shown?.durationMs ?: 0L
+        val total = if (tui.state.settings.value.preferences.timeDisplay == TimeDisplay.REMAINING && duration > 0) "-" + formatTime((duration - position).coerceAtLeast(0))
         else formatTime(duration.takeIf { it > 0 })
-        val time = "${formatTime(position.takeIf { shown != null })} / $total"
+        return "${formatTime(position.takeIf { shown != null })} / $total"
+    }
+
+    /**
+     * The toolbars' slider from [seekX] with the time after it, "1:34 / 4:43", ending two cells before [until]; the
+     * time alone where the slider has no room, and nothing where neither has.
+     */
+    private fun sliderAndTime(tui: Tui, canvas: Canvas, seekX: Int, row: Int, until: Int, bg: Rgb) {
+        val p = tui.palette
+        val state = tui.state
+        val playback = state.playback.value
+        val track = shownTrack(tui)
+        val shown = track ?: state.queue.state.value.current
+        val position = if (track != null) playback.positionMs else 0L
+        val duration = if (track != null) playback.durationMs else shown?.durationMs ?: 0L
+        val time = toolbarTime(tui)
         val timeW = Canvas.displayWidth(time)
-        val seekW = repeatX - 2 - timeW - 1 - seekX
+        val seekW = until - timeW - 1 - seekX
         val ink = if (p.skinned) Skin.text(p) else p.subtext
         if (seekW >= 6) {
             val fraction = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
             SeekBars.draw(
-                canvas, p, preferences.progressBarStyle, seekX, row, seekW, fraction, playing, bg,
+                canvas, p, state.settings.value.preferences.progressBarStyle, seekX, row, seekW, fraction, playback.status == PlaybackStatus.PLAYING, bg,
                 seed = shown?.queueKey.orEmpty(), durationMs = duration,
             )
             if (track != null && duration > 0) {
@@ -384,32 +561,51 @@ object PlayerBar {
                 }
             }
             canvas.write(seekX + seekW + 1, row, time, ink, bg)
-        } else if (repeatX - 2 - seekX >= timeW) {
+        } else if (until - seekX >= timeW) {
             canvas.write(seekX, row, time, ink, bg)
-        }
-
-        // The song, in the edge: over the buttons from the left, or in the skins after them, up to repeat.
-        label?.let {
-            val ink2 = when {
-                playback.status == PlaybackStatus.ERROR -> p.bad
-                p.skinned -> Skin.text(p)
-                else -> p.subtext
-            }
-            val from = if (p.skinned) seekX else x + 2
-            val until = if (p.skinned) repeatX - 1 else x + w * 7 / 10
-            if (until - from >= 8) canvas.write(from, y, " $it ", ink2, bg, max = until - from)
         }
     }
 
-    /** How wide one of the toolbar's buttons is: a glyph of two cells with a cell either side, and 98's edges. */
-    private fun toolButtonWidth(p: Palette, narrow: Boolean = false): Int = if (p.skinned && !narrow) 6 else 4
+    /**
+     * The song set into the toolbars' top edge, or the one waiting: in the Windows themes after the buttons, from
+     * [from] to [until], their buttons standing up out of the edge before it; elsewhere from the left, over them.
+     */
+    private fun songInEdge(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int, from: Int, until: Int, bg: Rgb) {
+        val p = tui.palette
+        val playback = tui.state.playback.value
+        val track = shownTrack(tui)
+        val waiting = tui.state.queue.state.value.current
+        val label = when {
+            track != null && playback.status == PlaybackStatus.RESOLVING -> "${track.title} – finding the audio…"
+            track != null && playback.status == PlaybackStatus.ERROR -> "${track.title} – ${playback.errorMessage ?: "could not play this"}"
+            track != null -> listOfNotNull(track.title, track.artistLine.takeIf(String::isNotBlank)).joinToString(" – ")
+            waiting != null -> "${waiting.title} – ready: ${tui.key(KeyAction.PLAY_PAUSE)} plays it"
+            else -> return
+        }
+        val ink = when {
+            playback.status == PlaybackStatus.ERROR -> p.bad
+            p.skinned -> Skin.text(p)
+            else -> p.subtext
+        }
+        val start = if (p.skinned) from else x + 2
+        val end = if (p.skinned) until else x + w * 7 / 10
+        if (end - start >= 8) canvas.write(start, y, " $label ", ink, bg, max = end - start)
+    }
 
     /**
-     * One of the toolbar's buttons at [x]: flat, its glyph lit in the accent on the selection while [pressed]; or,
-     * in the Windows themes, a slab of theirs, raised or pressed in. [dim] is a button with nothing to act on.
+     * How wide one of the toolbars' buttons is: its glyph in two cells, or a word as wide as it is, with a cell either
+     * side, and the skins' edges.
+     */
+    private fun toolWidth(p: Palette, glyph: String, narrow: Boolean = false): Int =
+        maxOf(2, Canvas.displayWidth(glyph)) + 2 + if (p.skinned && !narrow) 2 else 0
+
+    /**
+     * One of the toolbars' buttons at [x]: flat, its glyph lit in the accent on the selection while [pressed]; or,
+     * in the Windows themes, a slab of theirs, raised or pressed in. [dim] is a button with nothing to act on. The
+     * glyph takes two cells, as every set's do, or as many as a word does -- Toolbar 2's speed, "1.25×".
      */
     private fun toolButton(canvas: Canvas, p: Palette, x: Int, y: Int, glyph: String, pressed: Boolean, dim: Boolean, bg: Rgb, narrow: Boolean = false): Int {
-        val label = glyph.padEnd(2).let { if (Canvas.displayWidth(it) > 2) it.take(2) else it }
+        val label = glyph.padEnd(2)
         if (p.skinned) return skinButton(canvas, p, x, y, label, pressed, dim, if (narrow) 0 else 1)
         val back = if (pressed) p.selection else bg
         val ink = when {
@@ -417,8 +613,9 @@ object PlayerBar {
             dim -> p.faint
             else -> p.text
         }
-        canvas.write(x, y, " $label ", ink, back, BOLD, max = 4)
-        return 4
+        val w = maxOf(2, Canvas.displayWidth(label)) + 2
+        canvas.write(x, y, " $label ", ink, back, BOLD, max = w)
+        return w
     }
 
     /**
@@ -427,7 +624,8 @@ object PlayerBar {
      * edged in blue, pressed in its selection's blue. Returns how wide it is.
      */
     private fun skinButton(canvas: Canvas, p: Palette, x: Int, y: Int, label: String, pressed: Boolean, dim: Boolean, pad: Int): Int {
-        val w = 4 + 2 * pad
+        val cells = maxOf(2, Canvas.displayWidth(label))
+        val w = cells + 2 + 2 * pad
         val xp = p.skin == ThemeSkin.WINDOWS_XP
         val c = p.w98
         val face = when {
@@ -445,7 +643,7 @@ object PlayerBar {
             dim -> c.greyText
             else -> c.text
         }
-        canvas.write(x + 1 + pad, y, label, ink, face, BOLD, max = 2)
+        canvas.write(x + 1 + pad, y, label, ink, face, BOLD, max = cells)
         return w
     }
 

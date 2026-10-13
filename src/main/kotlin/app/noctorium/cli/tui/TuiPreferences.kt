@@ -79,6 +79,15 @@ enum class TuiPlayerBar(val displayName: String, val description: String) {
         "Toolbar",
         "One row of flat buttons, as a desktop music player has them: add to a playlist, previous, play, pause, stop and next, a slider and the time, then repeat, shuffle and the volume.",
     ),
+    /**
+     * The Toolbar asked for again with play and pause one button and no add button, and the bar's other buttons
+     * after the slider. Which of them it carries is core's player-bar buttons setting, kept as the desktop's bar
+     * keeps it: Stop once asked for, and any of the rest put away. See [PlayerBar].
+     */
+    TOOLBAR_2(
+        "Toolbar 2",
+        "The Toolbar's flat buttons with play and pause as one, and more of them: like, lyrics and the queue, repeat and shuffle, the sleep timer, Connect, the speed and the volume.",
+    ),
 }
 
 /** How Now playing is laid out in a terminal; chosen apart from the desktop's and the phone's, as the bar is. */

@@ -30,8 +30,14 @@ class SettingsIndexTest {
     fun `every setting has an entry, and every entry is a setting`() {
         val known = SettingsIndex.ENTRIES.map { it.id }
         assertEquals(known.distinct(), known, "Each entry once")
-        // The clock's row is there with the Taskbar; the rest are there always, or shown with another.
-        val seen = (actions() + run { tui.preferences.playerBar = TuiPlayerBar.TASKBAR; actions() }).toMutableList()
+        // The clock's row is there with the Taskbar, and the buttons' with Toolbar 2; the rest are there always, or
+        // shown with another.
+        val seen = (
+            actions() +
+                run { tui.preferences.playerBar = TuiPlayerBar.TASKBAR; actions() } +
+                run { tui.preferences.playerBar = TuiPlayerBar.TOOLBAR_2; actions() }
+            ).toMutableList()
+        assertTrue(seen.any { it.id == "playerButtons" }, "Toolbar 2's buttons are never offered")
         seen.forEach { row ->
             val id = row.id
             assertTrue(id != null, "\"${row.label}\" has no id for the search")
@@ -69,6 +75,10 @@ class SettingsIndexTest {
         assertEquals("seekBar", first("progress bar"))
         assertEquals("glyphs", first("nerd font"))
         assertEquals("homePlay", first("playing a song"))
+        assertEquals("playerBar", first("toolbar"))
+        assertEquals("playerBar", first("toolbar 2"))
+        assertEquals("playerButtons", first("stop button"))
+        assertEquals("playerButtons", first("hide buttons"))
         // A typo forgiven in a long word.
         assertEquals("equaliser", first("equaliserr"))
         assertEquals(null, first("nothing like any of them xyzzy"))

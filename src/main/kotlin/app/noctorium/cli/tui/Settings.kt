@@ -16,6 +16,7 @@ import app.noctorium.settings.EqualizerPreset
 import app.noctorium.settings.AccountConnectionStatus
 import app.noctorium.settings.AutoplaySource
 import app.noctorium.settings.HomePlay
+import app.noctorium.settings.PlayerButton
 import app.noctorium.settings.ProgressBarStyle
 import app.noctorium.settings.QueueColumn
 import app.noctorium.settings.ScrobbleConnectionStatus
@@ -24,7 +25,9 @@ import app.noctorium.settings.ThemePreset
 import app.noctorium.settings.ThemeSkin
 import app.noctorium.settings.TimeDisplay
 import app.noctorium.settings.VisualiserStyle
+import app.noctorium.settings.showsPlayerButton
 import app.noctorium.settings.themeSkin
+import app.noctorium.settings.withPlayerButton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -163,6 +166,20 @@ object Settings {
                     detail = "The time at the end of the taskbar's tray, which also sets the sleep timer",
                     step = { state.setTaskbarClock(!preferences.taskbarClock) },
                     id = "taskbarClock",
+                ),
+            )
+        }
+        // Toolbar 2's buttons, offered with it: core's player-bar buttons, kept as the desktop's bar keeps them --
+        // Stop there once asked for, any of the rest put away.
+        if (bar == TuiPlayerBar.TOOLBAR_2) {
+            val shown = PlayerBar.TOOLBAR_2_BUTTONS.filter { preferences.desktop.showsPlayerButton(it) }
+            add(
+                Row.Action(
+                    "Player bar buttons",
+                    value = if (shown.isEmpty()) "None" else shown.joinToString(", ") { it.displayName },
+                    detail = "Which Toolbar 2 has after the slider, and Stop after next",
+                    run = { tui.overlays.addLast(playerButtons(tui)) },
+                    id = "playerButtons",
                 ),
             )
         }
@@ -592,6 +609,26 @@ object Settings {
         ) { chosen ->
             val picked = QueueColumn.normalised(chosen.map { all[it] })
             if (picked != state.settings.value.preferences.queueColumns) state.setQueueColumns(picked)
+        }
+    }
+
+    /**
+     * Toolbar 2's buttons, each ticked or not: Stop is one the listener asks for, the rest are there until put
+     * away. Kept where core keeps the desktop bar's, in this program's own settings file, so the choice is the
+     * terminal's alone.
+     */
+    private fun playerButtons(tui: Tui): Overlay {
+        val state = tui.state
+        val all = PlayerBar.TOOLBAR_2_BUTTONS
+        return Overlay.Checklist(
+            "Player bar buttons",
+            all.map { if (it == PlayerButton.STOP) "${it.displayName}, after next" else it.displayName },
+            all.indices.filter { state.settings.value.preferences.desktop.showsPlayerButton(all[it]) },
+            "Space ticks · Esc when done · a button showing something under way stays",
+        ) { chosen ->
+            val ticked = chosen.map { all[it] }.toSet()
+            val changed = all.filter { (it in ticked) != state.settings.value.preferences.desktop.showsPlayerButton(it) }
+            if (changed.isNotEmpty()) state.updateDesktop { changed.fold(this) { desktop, button -> desktop.withPlayerButton(button, button in ticked) } }
         }
     }
 

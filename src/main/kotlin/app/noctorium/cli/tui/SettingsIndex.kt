@@ -28,8 +28,9 @@ object SettingsIndex {
         entry("theme", "Theme", Settings.LOOK, "The colours, and the Windows themes drawn as themselves.", "dark mode", "light mode", "colours", "colors", "skin", "windows 98", "windows xp"),
         entry("accent", "Accent", Settings.LOOK, "The colour that picks things out, or one from the cover.", "colour", "color", "highlight", "tint"),
         entry("glyphs", "Symbols", Settings.LOOK, "The buttons' and pages' symbols: the standard ones, plain ASCII, or a Nerd Font's icons.", "icons", "icon set", "glyphs", "nerd font", "ascii", "emoji"),
-        entry("playerBar", "Player bar", Settings.LOOK, "How the bar along the foot is laid out: full, compact, a taskbar or a toolbar.", "controls", "toolbar", "taskbar", "compact", "footer"),
+        entry("playerBar", "Player bar", Settings.LOOK, "How the bar along the foot is laid out: full, compact, a taskbar, or a toolbar as it was or Toolbar 2.", "controls", "toolbar", "toolbar 2", "taskbar", "compact", "footer"),
         entry("taskbarClock", "Show the clock", Settings.LOOK, "The time in the taskbar's tray.", "time", "tray", "clock"),
+        entry("playerButtons", "Player bar buttons", Settings.LOOK, "Which buttons Toolbar 2 has: Stop, like, lyrics, the queue, the sleep timer, the speed and the rest.", "player buttons", "buttons", "stop button", "hide buttons", "controls"),
         entry("seekBar", "Seek bar", Settings.LOOK, "The bar that shows how far into the song it is.", "progress bar", "scrubber", "slider", "timeline", "position"),
         entry("nowPlaying", "Now playing", Settings.LOOK, "How Now playing is laid out: classic, big type, cover, lyrics or playlist.", "layout", "full screen", "playlist"),
         entry("visualiser", "Visualiser", Settings.LOOK, "Bars or a level meter from the sound itself, in the Playlist layout.", "visualizer", "spectrum", "analyser", "analyzer", "level meter", "vu meter", "bars"),
@@ -79,6 +80,7 @@ object SettingsIndex {
      */
     val SHOWN_WITH: Map<String, Pair<String, String>> = mapOf(
         "taskbarClock" to ("playerBar" to "The clock is there with the Taskbar, or a Windows theme"),
+        "playerButtons" to ("playerBar" to "The buttons are there to choose with Toolbar 2"),
         "spotifyPlayback" to ("spotifyPremium" to "There once Spotify Premium is signed in"),
         "spotifyDevice" to ("spotifyPremium" to "There once Spotify Premium is signed in"),
     )

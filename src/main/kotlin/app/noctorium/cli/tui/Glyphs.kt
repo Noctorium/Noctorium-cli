@@ -26,6 +26,13 @@ class Glyphs private constructor(
     val repeatOne: String,
     /** Add to a playlist: the Toolbar's first button. */
     val add: String,
+    /** Toolbar 2's way to the lyrics, on Now playing. */
+    val lyrics: String,
+    /**
+     * Toolbar 2's way to Devices, where Connect is: not the page's own symbol, which in the standard set is
+     * shuffle's too, and the two sit side by side there.
+     */
+    val devices: String,
     val liked: String,
     val like: String,
     /** What the volume is labelled with. */
@@ -41,14 +48,14 @@ class Glyphs private constructor(
     companion object {
         val STANDARD = Glyphs(
             previous = "|◀", play = "▶ ", pause = "▮▮", waiting = "··", stop = "■", next = "▶|",
-            shuffle = "⇄", repeat = "↻", repeatOne = "↻1", add = "+", liked = "♥", like = "♡",
+            shuffle = "⇄", repeat = "↻", repeatOne = "↻1", add = "+", lyrics = "¶", devices = "◎", liked = "♥", like = "♡",
             volume = "vol", sleep = "☾", playing = "▶", search = "⌕",
             pages = Page.entries.associateWith { it.icon },
         )
 
         val ASCII = Glyphs(
             previous = "|<", play = "> ", pause = "||", waiting = "..", stop = "[]", next = ">|",
-            shuffle = "S", repeat = "R", repeatOne = "R1", add = "+", liked = "<3", like = "<3",
+            shuffle = "S", repeat = "R", repeatOne = "R1", add = "+", lyrics = "Ly", devices = "@", liked = "<3", like = "<3",
             volume = "vol", sleep = "z", playing = ">", search = "/",
             pages = mapOf(
                 Page.HOME to "~", Page.SEARCH to "/", Page.LIBRARY to "#", Page.QUEUE to "=",
@@ -56,10 +63,10 @@ class Glyphs private constructor(
             ),
         )
 
-        /** Font Awesome's, as every Nerd Font has them: fa-step-backward, fa-play, fa-pause and the rest. */
+        /** Font Awesome's, as every Nerd Font has them: fa-step-backward, fa-play, fa-pause, fa-microphone and the rest. */
         val NERD_FONT = Glyphs(
             previous = "", play = " ", pause = " ", waiting = " ", stop = "", next = "",
-            shuffle = "", repeat = "", repeatOne = "1", add = "", liked = "", like = "",
+            shuffle = "", repeat = "", repeatOne = "1", add = "", lyrics = "", devices = "", liked = "", like = "",
             volume = "", sleep = "", playing = "", search = "",
             pages = mapOf(
                 Page.HOME to "", Page.SEARCH to "", Page.LIBRARY to "", Page.QUEUE to "",

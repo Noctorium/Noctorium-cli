@@ -14,8 +14,11 @@ import app.noctorium.playback.PlaybackStatus
 import app.noctorium.playback.StreamFormat
 import app.noctorium.playback.VolumeBoost
 import app.noctorium.settings.HomePlay
+import app.noctorium.settings.PlayerButton
 import app.noctorium.settings.QueueColumn
 import app.noctorium.settings.VisualiserStyle
+import app.noctorium.settings.showsPlayerButton
+import app.noctorium.settings.withPlayerButton
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -30,10 +33,10 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * What came with the desktop-music-player look, in the terminal, drawn into frames and read back: the Toolbar, the
- * booster on the volume, Stop and stop after this song, the Playlist layout with its table, visualiser and status
- * bar, the symbols, Clear all but this song, a song from Home, and the bang in a search. Bandcamp's stand-in is the
- * only service, and the player only pretends -- with a format and a visualiser feed of its own to report.
+ * What came with the desktop-music-player look, in the terminal, drawn into frames and read back: the Toolbar and
+ * Toolbar 2, the booster on the volume, Stop and stop after this song, the Playlist layout with its table, visualiser
+ * and status bar, the symbols, Clear all but this song, a song from Home, and the bang in a search. Bandcamp's stand-in
+ * is the only service, and the player only pretends -- with a format and a visualiser feed of its own to report.
  */
 class PlayerLooksTest {
     /** A player that keeps what it was asked, says what it plays as, and has a visualiser feed while watched. */
@@ -127,6 +130,112 @@ class PlayerLooksTest {
         waitFor { "seek 0" in player.calls }
         click(render(), " + ")
         assertEquals("Add to a playlist", assertIs<Overlay.Picker>(tui.overlays.last()).title)
+    }
+
+    @Test
+    fun `Toolbar 2 is the toolbar with play and pause as one and no add button, and the bar's other buttons after the slider`() {
+        playing()
+        tui.preferences.playerBar = TuiPlayerBar.TOOLBAR_2
+        tui.page = Page.QUEUE
+        val canvas = render()
+        val bar = lines(canvas).last()
+        // In the desktop's order: the transport, the slider and its time, like, lyrics and the queue, repeat and
+        // shuffle, then the sleep timer, Devices, the speed and the volume.
+        val order = listOf("|◀", "▮▮", "▶|", "1:34 / 4:43", "♡", "¶", "≡", "↻", "⇄", "☾", "◎", "1×", "vol")
+        order.forEach { assertTrue(it in bar, "\"$it\" is not in Toolbar 2:\n$bar") }
+        assertEquals(order, order.sortedBy { bar.indexOf(it) }, bar)
+        // One button for play and pause, saying what it will do; no add button, and no Stop until asked for.
+        assertFalse("▶ " in bar || " + " in bar || "■" in bar, bar)
+        assertTrue("Awake – Tycho" in lines(canvas)[canvas.height - 2], lines(canvas)[canvas.height - 2])
+        assertEquals(42 - 1 - 2 - 3, tui.listView.height, "Toolbar 2 is two rows with its edge, as the Toolbar is")
+
+        click(canvas, "▮▮")
+        waitFor { state.playback.value.status == PlaybackStatus.PAUSED }
+        click(render(), "▶ ")
+        waitFor { state.playback.value.status == PlaybackStatus.PLAYING }
+        click(render(), "¶")
+        assertEquals(Page.NOW_PLAYING, tui.page)
+        click(render(), "≡")
+        assertEquals(Page.QUEUE, tui.page)
+        click(render(), "◎")
+        assertEquals(Page.DEVICES, tui.page)
+        tui.page = Page.SEARCH
+        val shuffled = state.queue.state.value.shuffleEnabled
+        click(render(), "⇄")
+        waitFor { state.queue.state.value.shuffleEnabled != shuffled }
+        val repeat = state.queue.state.value.repeatMode
+        click(render(), "↻")
+        waitFor { state.queue.state.value.repeatMode != repeat }
+        click(render(), "☾")
+        assertEquals("Sleep timer", assertIs<Overlay.Picker>(tui.overlays.last()).title)
+        tui.overlays.clear()
+        // The speed opens Settings' speeds, and then shows the one chosen.
+        click(render(), "1×")
+        assertEquals("Speed", assertIs<Overlay.Picker>(tui.overlays.last()).title)
+        tui.press(Input.Text("5"))
+        waitFor { state.settings.value.preferences.playbackSpeed == 1.5f }
+        assertTrue("1.5×" in lines(render()).last(), lines(render()).last())
+        // A Bandcamp song cannot be liked from here: the heart is dim, and pressing it says so.
+        click(render(), "♡")
+        assertTrue(lines(render()).any { "cannot be liked" in it }, lines(render()).joinToString("\n"))
+        click(render(), "vol")
+        assertIs<VolumePanel>(tui.overlays.last())
+    }
+
+    @Test
+    fun `Toolbar 2's buttons give way as the terminal narrows, but never one showing something under way`() {
+        playing()
+        tui.preferences.playerBar = TuiPlayerBar.TOOLBAR_2
+        tui.page = Page.SEARCH
+        fun bar(w: Int) = lines(render(w, 30)).last()
+        // A little narrower, lyrics and the queue go first: they only lead to other pages.
+        val middling = bar(92)
+        listOf("|◀", "▮▮", "▶|", "♡", "↻", "⇄", "☾", "◎", "1×", "vol", "4:43").forEach { assertTrue(it in middling, "\"$it\" is gone at 92:\n$middling") }
+        assertFalse("¶" in middling || "≡" in middling, middling)
+        // Narrower again, repeat, shuffle, the sleep timer and the speed; the transport, the time and the volume stay.
+        val narrow = bar(84)
+        listOf("|◀", "▮▮", "▶|", "♡", "◎", "vol", "4:43").forEach { assertTrue(it in narrow, "\"$it\" is gone at 84:\n$narrow") }
+        listOf("¶", "≡", "↻", "⇄", "☾", "1×").forEach { assertFalse(it in narrow, "\"$it\" is still there at 84:\n$narrow") }
+        // A sleep timer counting down and a song played faster stay, whatever the room.
+        state.startSleepTimer(30)
+        state.setPlaybackSpeed(1.25f)
+        waitFor { state.sleepTimer.value != null && state.settings.value.preferences.playbackSpeed == 1.25f }
+        val busy = bar(84)
+        assertTrue("☾" in busy && "1.25×" in busy, busy)
+        assertFalse("↻" in busy || "⇄" in busy, busy)
+        // And at the narrowest the player allows, it still draws without falling over.
+        bar(40)
+        state.cancelSleepTimer()
+    }
+
+    @Test
+    fun `Toolbar 2 has Stop once asked for and leaves out what is put away, in core's player-bar buttons`() {
+        playing()
+        tui.preferences.playerBar = TuiPlayerBar.TOOLBAR_2
+        tui.page = Page.SEARCH
+        state.updateDesktop { withPlayerButton(PlayerButton.STOP, true).withPlayerButton(PlayerButton.LYRICS, false) }
+        waitFor { state.settings.value.preferences.desktop.showsPlayerButton(PlayerButton.STOP) }
+        val bar = lines(render()).last()
+        assertTrue(bar.indexOf("▮▮") < bar.indexOf("■") && bar.indexOf("■") < bar.indexOf("▶|"), bar)
+        assertFalse("¶" in bar, bar)
+        player.calls.clear()
+        click(render(), "■")
+        waitFor { "seek 0" in player.calls }
+
+        // Settings offers them with Toolbar 2, and ticking one there puts it back.
+        tui.page = Page.SETTINGS
+        val row = Settings.rows(tui).filterIsInstance<Row.Action>().first { it.id == "playerButtons" }
+        assertTrue("Stop" in row.value.orEmpty() && "Lyrics" !in row.value.orEmpty(), row.value)
+        row.run()
+        val list = assertIs<Overlay.Checklist>(tui.overlays.last())
+        assertEquals(PlayerBar.TOOLBAR_2_BUTTONS.size, list.labels.size)
+        tui.press(Input.Key(Keys.DOWN))
+        tui.press(Input.Text(" "))
+        tui.press(Input.Key(Keys.ESCAPE))
+        waitFor { state.settings.value.preferences.desktop.showsPlayerButton(PlayerButton.LYRICS) }
+        assertTrue(state.settings.value.preferences.desktop.showsPlayerButton(PlayerButton.STOP))
+        tui.page = Page.SEARCH
+        assertTrue("¶" in lines(render()).last())
     }
 
     @Test

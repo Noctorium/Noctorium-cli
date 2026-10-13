@@ -2,6 +2,7 @@ package app.noctorium.cli.tui
 
 import app.noctorium.cli.Qr
 import app.noctorium.playback.SLEEP_TIMER_PRESETS
+import kotlin.math.abs
 
 /**
  * Something laid over the page: a picker, a question, a code to scan. The newest one gets the keys first;
@@ -535,6 +536,20 @@ object Overlays {
             if (state.sleepTimer.value != null) add("Ten more minutes" to { state.extendSleepTimer(10) })
         }
         return Overlay.Picker("Sleep timer", options)
+    }
+
+    /** The speeds Settings steps through, the one in force ticked: Toolbar 2's speed button. */
+    fun speed(tui: Tui): Overlay {
+        val state = tui.state
+        val now = state.settings.value.preferences.playbackSpeed
+        val options = Settings.SPEEDS.map { speed ->
+            val label = Settings.speedName(speed) + (if (speed == 1f) " (as recorded)" else "") + if (abs(speed - now) < .01f) "  ✓" else ""
+            label to { state.setPlaybackSpeed(speed); tui.toast("Speed: ${Settings.speedName(speed)}") }
+        }
+        // Spotify's own app plays a Spotify song at its own speed, as the desktop's speed button says.
+        val track = state.playback.value.track
+        val note = "Spotify plays this song in its own app, at its own speed.".takeIf { track != null && NowPlaying.playsOnSpotify(tui, track) }
+        return Overlay.Picker("Speed", options, note)
     }
 }
 

@@ -2,7 +2,9 @@ package app.noctorium.cli.tui
 
 import app.noctorium.cli.CliParts
 import app.noctorium.cli.cliAppState
+import app.noctorium.domain.Artist
 import app.noctorium.domain.PlaybackOrigin
+import app.noctorium.domain.ProviderType
 import app.noctorium.domain.Track
 import app.noctorium.playback.AudioAnalysis
 import app.noctorium.playback.AudioAnalysisKind
@@ -12,9 +14,12 @@ import app.noctorium.playback.PlaybackState
 import app.noctorium.playback.PlaybackStatus
 import app.noctorium.playback.StreamFormat
 import app.noctorium.settings.NoctoriumPreferences
+import app.noctorium.settings.PlayerButton
 import app.noctorium.settings.ProgressBarStyle
 import app.noctorium.settings.ThemePreset
 import app.noctorium.settings.VisualiserStyle
+import app.noctorium.settings.showsPlayerButton
+import app.noctorium.settings.withPlayerButton
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.math.sin
@@ -376,6 +381,70 @@ class TuiRenderCheck {
             state.setTheme(ThemePreset.NOCTORIUM_NIGHT)
             state.setProgressBarStyle(ProgressBarStyle.MINIMAL)
             state.setVisualiser(VisualiserStyle.BARS)
+            state.close()
+        }
+    }
+
+    /**
+     * Toolbar 2 in a dark theme, a light one and the three Windows ones, wide, a little narrower and narrow; with a
+     * sleep timer, a faster speed, the booster and Stop; and in the other symbol sets. Over a queue of made-up songs
+     * with Bandcamp's stand-in for the only service, so it needs no network and no account.
+     */
+    @Test
+    fun `Toolbar 2 draws`() {
+        val folder = folder ?: return
+        folder.mkdirs()
+        val parts = CliParts()
+        val player = StandIn()
+        val state = app.noctorium.cli.BandcampStandIn.state(parts, player)
+        val tui = Tui(state, parts, web = null)
+        val artist = Artist("lanterns", "The Paper Lanterns", ProviderType.BANDCAMP)
+        val songs = listOf("Harbour Lights" to 249_000L, "Salt and Static" to 203_000L, "Night Ferry" to 187_000L).mapIndexed { i, (title, ms) ->
+            Track(provider = ProviderType.BANDCAMP, id = "90$i", title = title, artists = listOf(artist), durationMs = ms, sourceUrl = "https://example.invalid/track/$i")
+        }
+        try {
+            state.setAutoplay(false)
+            state.play(songs.first(), PlaybackOrigin.SEARCH, songs)
+            waitFor(10_000) { state.playback.value.track != null }
+            tui.preferences.playerBar = TuiPlayerBar.TOOLBAR_2
+            tui.page = Page.QUEUE
+            val themes = listOf(
+                ThemePreset.NOCTORIUM_NIGHT to "night",
+                ThemePreset.CATPPUCCIN_LATTE to "latte",
+                ThemePreset.WINDOWS_98 to "98",
+                ThemePreset.WINDOWS_98_NOCTORIUM to "noctorium-98",
+                ThemePreset.WINDOWS_XP to "xp",
+            )
+            for ((theme, name) in themes) {
+                state.setTheme(theme)
+                state.setProgressBarStyle(if (theme == ThemePreset.WINDOWS_98) ProgressBarStyle.CLASSIC else ProgressBarStyle.SLIDER)
+                write(folder, "toolbar2-$name", tui)
+                write(folder, "toolbar2-$name-92", tui, 92, 24)
+                write(folder, "toolbar2-$name-narrow", tui, 84, 24)
+            }
+
+            // Under way: a sleep timer, a faster speed and the booster, with Stop asked for -- wide and narrow.
+            state.setTheme(ThemePreset.NOCTORIUM_NIGHT)
+            state.startSleepTimer(30)
+            state.setPlaybackSpeed(1.25f)
+            state.setVolumeBoostPercent(400)
+            state.updateDesktop { withPlayerButton(PlayerButton.STOP, true) }
+            waitFor(5_000) { state.settings.value.preferences.desktop.showsPlayerButton(PlayerButton.STOP) }
+            write(folder, "toolbar2-under-way", tui)
+            write(folder, "toolbar2-under-way-narrow", tui, 84, 24)
+            state.setTheme(ThemePreset.WINDOWS_XP)
+            write(folder, "toolbar2-xp-under-way", tui)
+            write(folder, "toolbar2-xp-under-way-narrow", tui, 84, 24)
+
+            // The other symbols.
+            state.setTheme(ThemePreset.NOCTORIUM_NIGHT)
+            for (glyphs in listOf(TuiGlyphs.ASCII, TuiGlyphs.NERD_FONT)) {
+                tui.preferences.glyphs = glyphs
+                write(folder, "toolbar2-glyphs-${glyphs.name.lowercase()}", tui)
+            }
+        } finally {
+            tui.preferences.glyphs = TuiGlyphs.STANDARD
+            tui.preferences.playerBar = TuiPlayerBar.FULL
             state.close()
         }
     }
