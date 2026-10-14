@@ -22,6 +22,22 @@ object NowPlaying {
         manualOffset = (manualOffset ?: 0) + by
     }
 
+    /** Back to following the line being sung, or to the top of plain lyrics. */
+    fun unscroll() {
+        manualOffset = null
+    }
+
+    /**
+     * Asks for [track]'s lyrics the first time it is drawn -- by a layout here or by the Playlist layout's Lyrics tab
+     * -- and starts its words from where the song is rather than where the last one's were scrolled to.
+     */
+    fun follow(tui: Tui, track: Track) {
+        if (track.queueKey == lastTrack) return
+        lastTrack = track.queueKey
+        manualOffset = null
+        tui.state.loadLyrics(track)
+    }
+
     fun draw(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int, h: Int) {
         val p = tui.palette
         val state = tui.state
@@ -34,11 +50,7 @@ object NowPlaying {
             canvas.writeCentred(x, w, y + h / 2 + 1, "Press ${tui.key(KeyAction.SEARCH)} to find something, then Enter", p.faint)
             return
         }
-        if (track.queueKey != lastTrack) {
-            lastTrack = track.queueKey
-            manualOffset = null
-            state.loadLyrics(track)
-        }
+        follow(tui, track)
         when (tui.preferences.nowPlaying) {
             TuiNowPlaying.CLASSIC -> classic(tui, canvas, x, y, w, h, track)
             TuiNowPlaying.BIG_TYPE -> poster(tui, canvas, x, y, w, h, track)
@@ -281,17 +293,23 @@ object NowPlaying {
         }
     }
 
-    private fun lyrics(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int, h: Int) {
+    /**
+     * The sources' chips over the lyrics, the line being sung lit and kept a little above the middle, the ones sung
+     * dimmed. [well] is a Windows theme's white list box -- the Playlist layout's Lyrics tab -- where the line being
+     * sung is picked out as a list's chosen row was, and the rest is written in the box's own black and grey.
+     */
+    internal fun lyrics(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int, h: Int, well: Boolean = false) {
         val p = tui.palette
         val state = tui.state
         val lyrics = state.lyrics.value
         val position = state.playback.value.positionMs
+        val boxed = well && p.skinned
         chips(tui, canvas, x, y, w, centred = false)
         val body = y + 2
         val bodyH = h - 2
         val result = lyrics.outcomes.firstOrNull { it.provider == lyrics.selectedProvider }?.result
         if (result == null || result.lines.isEmpty()) {
-            canvas.write(x, body + 1, noLyrics(tui), p.faint, null, ITALIC, max = w)
+            canvas.write(x, body + 1, noLyrics(tui), if (boxed) Skin.greyText(p) else p.faint, null, ITALIC, max = w)
             return
         }
         // Wrapped to the width, keeping which original line each piece came from.
@@ -301,19 +319,30 @@ object NowPlaying {
         }
         val active = if (result.synced) result.lines.indexOfLast { (it.startTimeMs ?: Long.MAX_VALUE) <= position } else -1
         val activeRow = wrapped.indexOfFirst { it.first == active }
-        val automatic = if (activeRow >= 0) (activeRow - bodyH * 2 / 5).coerceAtLeast(0) else 0
-        val offset = ((manualOffset?.let { automatic + it }) ?: automatic).coerceIn(0, (wrapped.size - bodyH).coerceAtLeast(0))
+        val most = (wrapped.size - bodyH).coerceAtLeast(0)
+        // Where following the song puts the words, and the wheel's or the arrows' lines from there -- both kept to
+        // what there is to scroll, so a press at either end is never spent climbing back from past it.
+        val automatic = (if (activeRow >= 0) activeRow - bodyH * 2 / 5 else 0).coerceIn(0, most)
+        val offset = (automatic + (manualOffset ?: 0)).coerceIn(0, most)
+        if (manualOffset != null) manualOffset = offset - automatic
         for (row in 0 until bodyH) {
             val (index, text) = wrapped.getOrNull(offset + row) ?: break
             val colour = when {
+                boxed && index == active -> Skin.selectionText(p)
+                boxed && result.synced && index < active -> Skin.greyText(p)
+                boxed -> Skin.text(p)
                 index == active -> p.accent
                 result.synced && index < active -> p.faint
                 result.synced -> p.subtext
                 else -> p.text
             }
-            canvas.write(x, body + row, text, colour, null, if (index == active) BOLD else 0, max = w)
+            val lit = if (boxed && index == active) Skin.selection(p) else null
+            if (lit != null) canvas.fill(x - 1, body + row, w + 1, 1, lit)
+            canvas.write(x, body + row, text, colour, lit, if (index == active) BOLD else 0, max = w)
         }
-        result.attribution?.let { if (offset + bodyH >= wrapped.size) canvas.write(x, y + h - 1, it, p.faint, null, ITALIC, max = w) }
+        result.attribution?.let {
+            if (offset + bodyH >= wrapped.size) canvas.write(x, y + h - 1, it, if (boxed) Skin.greyText(p) else p.faint, null, ITALIC, max = w)
+        }
     }
 
     /**

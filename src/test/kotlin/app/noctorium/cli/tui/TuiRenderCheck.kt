@@ -450,6 +450,101 @@ class TuiRenderCheck {
     }
 
     /**
+     * Devices with Noctorium Connect on and off, the same switch in Settings and found by its search, and the Playlist
+     * layout's Lyrics tab -- playing, scrolled, and with nothing playing -- in a dark theme, a light one and the three
+     * Windows ones, wide and narrow. Over made-up songs with made-up lyrics and Bandcamp's stand-in for the only
+     * service, so it needs no network and no account.
+     */
+    @Test
+    fun `Connect's switch and the Playlist layout's lyrics draw`() {
+        val folder = folder ?: return
+        folder.mkdirs()
+        val parts = CliParts()
+        val player = StandIn()
+        val state = app.noctorium.cli.BandcampStandIn.state(parts, player)
+        val tui = Tui(state, parts, web = null)
+        val artist = Artist("lanterns", "The Paper Lanterns", ProviderType.BANDCAMP)
+        val songs = listOf("Harbour Lights" to 249_000L, "Salt and Static" to 203_000L, "Night Ferry" to 187_000L).mapIndexed { i, (title, ms) ->
+            Track(provider = ProviderType.BANDCAMP, id = "90$i", title = title, artists = listOf(artist), durationMs = ms, sourceUrl = "https://example.invalid/track/$i")
+        }
+        val themes = listOf(
+            ThemePreset.NOCTORIUM_NIGHT to "night",
+            ThemePreset.CATPPUCCIN_LATTE to "latte",
+            ThemePreset.WINDOWS_98 to "98",
+            ThemePreset.WINDOWS_98_NOCTORIUM to "noctorium-98",
+            ThemePreset.WINDOWS_XP to "xp",
+        )
+        try {
+            state.setAutoplay(false)
+            app.noctorium.cli.LyricsStandIn.set(state, songs.first())
+            state.play(songs.first(), PlaybackOrigin.SEARCH, songs)
+            waitFor(10_000) { state.playback.value.track != null }
+            player.frames.value = AudioAnalysis(bands = List(10) { band -> (.8f - band * .05f) }, peaks = listOf(.9f, .85f), rms = listOf(.6f, .55f))
+            for ((theme, name) in themes) {
+                state.setTheme(theme)
+                state.setProgressBarStyle(if (theme == ThemePreset.WINDOWS_98) ProgressBarStyle.CLASSIC else ProgressBarStyle.SLIDER)
+                tui.page = Page.DEVICES
+                state.setConnectEnabled(true)
+                waitFor(5_000) { state.settings.value.preferences.connect.enabled }
+                write(folder, "devices-on-$name", tui)
+                state.setConnectEnabled(false)
+                waitFor(5_000) { !state.settings.value.preferences.connect.enabled }
+                write(folder, "devices-off-$name", tui)
+                write(folder, "devices-off-$name-narrow", tui, 84, 24)
+
+                tui.preferences.nowPlaying = TuiNowPlaying.PLAYLIST
+                tui.page = Page.NOW_PLAYING
+                PlaylistLayout.shown = PlaylistLayout.Tab.LYRICS
+                write(folder, "playlist-lyrics-$name", tui)
+                write(folder, "playlist-lyrics-$name-narrow", tui, 96, 30)
+                PlaylistLayout.shown = PlaylistLayout.Tab.QUEUE
+                write(folder, "playlist-queue-$name", tui)
+                tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
+            }
+
+            // Settings: the switch by the account, chosen, and the search finding it.
+            state.setTheme(ThemePreset.NOCTORIUM_NIGHT)
+            tui.page = Page.SETTINGS
+            SettingsIndex.jump(tui, "connect")
+            write(folder, "settings-connect-off", tui)
+            state.setConnectEnabled(true)
+            waitFor(5_000) { state.settings.value.preferences.connect.enabled }
+            write(folder, "settings-connect-on", tui)
+            state.setTheme(ThemePreset.WINDOWS_XP)
+            write(folder, "settings-connect-on-xp", tui)
+            state.setTheme(ThemePreset.NOCTORIUM_NIGHT)
+            tui.settingsQuery = "turn off connect"
+            tui.settingsSearchFocused = true
+            write(folder, "settings-search-connect", tui)
+            SettingsIndex.close(tui)
+
+            // Under Toolbar 2, whose lyrics button opens the layout on its lyrics; scrolled back to the top in a short
+            // terminal, and back to the line being sung.
+            tui.preferences.playerBar = TuiPlayerBar.TOOLBAR_2
+            tui.preferences.nowPlaying = TuiNowPlaying.PLAYLIST
+            tui.page = Page.NOW_PLAYING
+            PlaylistLayout.showLyrics()
+            write(folder, "playlist-lyrics-toolbar2", tui)
+            repeat(12) { tui.press(Input.Key(Keys.UP)) }
+            write(folder, "playlist-lyrics-scrolled-short", tui, 150, 24)
+            tui.press(Input.Key(Keys.HOME))
+            write(folder, "playlist-lyrics-short", tui, 150, 24)
+
+            // With nothing playing, the tab says what it is for.
+            state.clearQueue()
+            waitFor(5_000) { state.playback.value.track == null }
+            write(folder, "playlist-lyrics-nothing", tui)
+            state.setTheme(ThemePreset.WINDOWS_98)
+            write(folder, "playlist-lyrics-nothing-98", tui)
+        } finally {
+            PlaylistLayout.shown = PlaylistLayout.Tab.QUEUE
+            tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
+            tui.preferences.playerBar = TuiPlayerBar.FULL
+            state.close()
+        }
+    }
+
+    /**
      * The visualiser drawn from a real mpv measuring real sound, with nothing to hear: mpv plays to its null output
      * a sweep from the bass up over pink noise, made by ffmpeg, and the Playlist layout is drawn as it plays. Needs
      * `-Dnoctorium.live=true` as well, ffmpeg on the path, and mpv where `-Dnoctorium.mpv` says or on the path.

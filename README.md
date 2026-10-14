@@ -45,9 +45,10 @@ noctorium web                   the web player, for any browser on your network
   and the volume), or Toolbar 2, with play and pause as one and like, lyrics, the queue, the sleep timer, Devices
   and the speed beside them; Now playing is the cover beside the lyrics, a poster in big type, the cover alone,
   the lyrics large, or a playlist window — the cover in a panel, the queue as a table with the columns you
-  choose, a visualiser drawn from what mpv measures of the sound itself, and a status bar with the codec, the
-  bitrate and how far into the queue. The symbols are the terminal's own, plain ASCII, or a Nerd Font's icons
-  (Font Awesome's, as Nerd Fonts patch them in; Noctorium ships no font, it only names their code points).
+  choose and the lyrics in the tab beside it, a visualiser drawn from what mpv measures of the sound itself, and a
+  status bar with the codec, the bitrate and how far into the queue. The symbols are the terminal's own, plain
+  ASCII, or a Nerd Font's icons (Font Awesome's, as Nerd Fonts patch them in; Noctorium ships no font, it only
+  names their code points).
 - **Scrobbling** to Last.fm and ListenBrainz, Discord presence, downloads to keep, a sleep timer,
   Noctorium Connect to move the music to another device, switched on and off at the top of Devices.
 - **The web player.** `noctorium web`, or `w` inside the player, serves Noctorium to the browsers on your

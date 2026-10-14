@@ -111,7 +111,7 @@ enum class TuiNowPlaying(val displayName: String, val description: String) {
     ),
     PLAYLIST(
         "Playlist",
-        "The cover in a panel on the left, the queue as a table with columns, an info bar with the title large and a visualiser, and a status bar.",
+        "The cover in a panel on the left, the queue as a table with columns and the lyrics in a tab beside it, an info bar with the title large and a visualiser, and a status bar.",
     ),
 }
 

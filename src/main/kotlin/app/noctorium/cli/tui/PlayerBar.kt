@@ -476,7 +476,11 @@ object PlayerBar {
                 // Dim where the song's service cannot be liked from here; pressing it still says why, as the key does.
                 Tool(if (liked) g.liked else g.like, pressed = liked, dim = track == null || !likes.supports(track)) { track?.let(tui::like) }
             }
-            PlayerButton.LYRICS -> Tool(g.lyrics) { tui.go(Page.NOW_PLAYING) }
+            PlayerButton.LYRICS -> Tool(g.lyrics) {
+                // The Playlist layout has the lyrics in a tab of their own, which the button opens it on.
+                if (tui.preferences.nowPlaying == TuiNowPlaying.PLAYLIST) PlaylistLayout.showLyrics()
+                tui.go(Page.NOW_PLAYING)
+            }
             PlayerButton.QUEUE -> Tool(g.page(Page.QUEUE)) { tui.go(Page.QUEUE) }
             PlayerButton.REPEAT -> Tool(if (queue.repeatMode == RepeatMode.ONE) g.repeatOne else g.repeat, pressed = queue.repeatMode != RepeatMode.OFF) { state.cycleRepeat() }
             PlayerButton.SHUFFLE -> Tool(g.shuffle, pressed = queue.shuffleEnabled) { state.toggleShuffle() }

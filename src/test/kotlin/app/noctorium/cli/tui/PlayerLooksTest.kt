@@ -3,6 +3,8 @@ package app.noctorium.cli.tui
 import app.noctorium.cli.BandcampStandIn
 import app.noctorium.cli.BandcampStandIn.waitFor
 import app.noctorium.cli.CliParts
+import app.noctorium.cli.LyricsStandIn
+import app.noctorium.domain.Artist
 import app.noctorium.domain.PlaybackOrigin
 import app.noctorium.domain.ProviderType
 import app.noctorium.domain.Track
@@ -16,6 +18,7 @@ import app.noctorium.playback.VolumeBoost
 import app.noctorium.settings.HomePlay
 import app.noctorium.settings.PlayerButton
 import app.noctorium.settings.QueueColumn
+import app.noctorium.settings.ThemePreset
 import app.noctorium.settings.VisualiserStyle
 import app.noctorium.settings.showsPlayerButton
 import app.noctorium.settings.withPlayerButton
@@ -34,9 +37,10 @@ import kotlin.test.assertTrue
 
 /**
  * What came with the desktop-music-player look, in the terminal, drawn into frames and read back: the Toolbar and
- * Toolbar 2, the booster on the volume, Stop and stop after this song, the Playlist layout with its table, visualiser
- * and status bar, the symbols, Clear all but this song, a song from Home, and the bang in a search. Bandcamp's stand-in
- * is the only service, and the player only pretends -- with a format and a visualiser feed of its own to report.
+ * Toolbar 2, the booster on the volume, Stop and stop after this song, the Playlist layout with its table, its lyrics,
+ * visualiser and status bar, the symbols, Clear all but this song, a song from Home, and the bang in a search.
+ * Bandcamp's stand-in is the only service, and the player only pretends -- with a format and a visualiser feed of its
+ * own to report.
  */
 class PlayerLooksTest {
     /** A player that keeps what it was asked, says what it plays as, and has a visualiser feed while watched. */
@@ -74,6 +78,7 @@ class PlayerLooksTest {
         tui.preferences.playerBar = TuiPlayerBar.FULL
         tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
         tui.preferences.glyphs = TuiGlyphs.STANDARD
+        PlaylistLayout.shown = PlaylistLayout.Tab.QUEUE
         state.close()
     }
 
@@ -386,6 +391,124 @@ class PlayerLooksTest {
         state.setStatusBar(true)
         state.setVisualiser(VisualiserStyle.BARS)
         state.setQueueColumns(QueueColumn.DEFAULT)
+    }
+
+    /** Made-up lines, six and a half seconds apart from 0:20, so that the twelfth is being sung at the stand-in's 1:34. */
+    /** Made-up lines; at the stand-in's 1:34 the twelfth is being sung. */
+    private val words = LyricsStandIn.words
+
+    /** Made-up songs by a made-up band, which no lyrics source could know. */
+    private val harbour = listOf("Harbour Lights", "Salt and Static", "Night Ferry").mapIndexed { i, title ->
+        Track(
+            provider = ProviderType.BANDCAMP, id = "95$i", title = title, artists = listOf(Artist("lanterns", "The Paper Lanterns", ProviderType.BANDCAMP)),
+            durationMs = 200_000, sourceUrl = "https://example.invalid/track/$i",
+        )
+    }
+
+    private fun playingHarbour() {
+        state.setAutoplay(false)
+        waitFor { !state.settings.value.preferences.autoplay }
+        LyricsStandIn.set(state, harbour[0])
+        state.play(harbour[0], PlaybackOrigin.SEARCH, harbour)
+        waitFor { state.playback.value.status == PlaybackStatus.PLAYING && state.queue.state.value.tracks.size == harbour.size }
+    }
+
+    @Test
+    fun `the Playlist layout has the lyrics in a tab after the queue's, lit line by line as they are sung`() {
+        playingHarbour()
+        tui.preferences.nowPlaying = TuiNowPlaying.PLAYLIST
+        tui.page = Page.NOW_PLAYING
+        val table = lines(render())
+        val tabs = table.indexOfFirst { "Queue (3)" in it }
+        assertTrue(tabs >= 0 && table[tabs].indexOf("Lyrics") > table[tabs].indexOf("Queue (3)"), table.joinToString("\n"))
+        assertEquals(PlaylistLayout.Tab.QUEUE, PlaylistLayout.shown)
+
+        // ] goes to the lyrics: the sources' chips over them and the line being sung lit, where the table was; the
+        // info bar and the status bar stay.
+        tui.press(Input.Text("]"))
+        assertEquals(PlaylistLayout.Tab.LYRICS, PlaylistLayout.shown)
+        val canvas = render()
+        val page = lines(canvas)
+        assertTrue(page.any { "LRCLIB" in it && "Genius" in it }, page.joinToString("\n"))
+        assertFalse(page.any { "Title" in it && "Artist" in it && "Duration" in it }, page.joinToString("\n"))
+        val sung = page.indexOfFirst { words[11] in it }
+        assertTrue(sung > tabs, page.joinToString("\n"))
+        val at = sung * canvas.width + page[sung].indexOf(words[11])
+        assertEquals(tui.palette.accent, canvas.fg[at])
+        assertTrue(canvas.style[at] and BOLD != 0)
+        assertTrue(page.any { words[10] in it } && page.any { words[12] in it }, page.joinToString("\n"))
+        assertTrue("Opus, stereo, 48 kHz, 128 kbit/s" in page[canvas.height - 1 - 4], page[canvas.height - 1 - 4])
+
+        // In a short terminal the arrows scroll the words, and Home goes back to the line being sung.
+        val short = lines(render(150, 24))
+        assertTrue(short.any { words[11] in it } && short.none { words[0] in it }, short.joinToString("\n"))
+        repeat(6) { tui.press(Input.Key(Keys.UP)) }
+        assertTrue(lines(render(150, 24)).any { words[0] in it }, lines(render(150, 24)).joinToString("\n"))
+        tui.press(Input.Key(Keys.HOME))
+        assertTrue(lines(render(150, 24)).none { words[0] in it }, lines(render(150, 24)).joinToString("\n"))
+        // Enter has no song to play behind the words, and a track's keys work on the song playing.
+        tui.press(Input.Key(Keys.ENTER))
+        assertEquals(0, state.queue.state.value.currentIndex)
+        tui.press(Input.Text("a"))
+        waitFor { state.queue.state.value.tracks.size == 4 }
+        assertEquals(harbour[0].title, state.queue.state.value.tracks.last().title)
+
+        // Clicking the queue's tab brings the table back, and [ comes round to the lyrics again.
+        click(render(), "Queue (4)", tabs)
+        assertEquals(PlaylistLayout.Tab.QUEUE, PlaylistLayout.shown)
+        assertTrue(lines(render()).any { "Title" in it && "Artist" in it }, lines(render()).joinToString("\n"))
+        tui.press(Input.Text("]"))
+        assertEquals(PlaylistLayout.Tab.LYRICS, PlaylistLayout.shown)
+        tui.press(Input.Text("["))
+        assertEquals(PlaylistLayout.Tab.QUEUE, PlaylistLayout.shown)
+        tui.press(Input.Text("["))
+        assertEquals(PlaylistLayout.Tab.LYRICS, PlaylistLayout.shown, "With no autoplay songs, the tabs go round the queue and the lyrics")
+
+        // Toolbar 2's lyrics button opens the layout on its lyrics, from anywhere.
+        PlaylistLayout.shown = PlaylistLayout.Tab.QUEUE
+        tui.preferences.playerBar = TuiPlayerBar.TOOLBAR_2
+        tui.page = Page.QUEUE
+        click(render(), "¶")
+        assertEquals(Page.NOW_PLAYING, tui.page)
+        assertEquals(PlaylistLayout.Tab.LYRICS, PlaylistLayout.shown)
+        tui.preferences.playerBar = TuiPlayerBar.FULL
+
+        // In a Windows theme the words are in the table's white box, the line being sung picked out as a list's
+        // chosen row was.
+        state.setTheme(ThemePreset.WINDOWS_98)
+        waitFor { state.settings.value.preferences.theme == ThemePreset.WINDOWS_98 }
+        val boxed = render()
+        val row = lines(boxed).indexOfFirst { words[11] in it }
+        val cell = row * boxed.width + lines(boxed)[row].indexOf(words[11])
+        assertEquals(Skin.selection(tui.palette), boxed.bg[cell])
+        assertEquals(Skin.selectionText(tui.palette), boxed.fg[cell])
+        state.setTheme(ThemePreset.NOCTORIUM_NIGHT)
+        waitFor { state.settings.value.preferences.theme == ThemePreset.NOCTORIUM_NIGHT }
+
+        // With nothing playing, the tab says what it is for.
+        state.clearQueue()
+        waitFor { state.playback.value.track == null }
+        val empty = lines(render())
+        assertTrue(empty.any { "Nothing playing" in it } && empty.any { "The words of the song playing are shown here" in it }, empty.joinToString("\n"))
+    }
+
+    @Test
+    fun `the Lyrics tab draws in every kind of theme, from the smallest screen the player allows to a large one`() {
+        tui.preferences.nowPlaying = TuiNowPlaying.PLAYLIST
+        tui.page = Page.NOW_PLAYING
+        PlaylistLayout.shown = PlaylistLayout.Tab.LYRICS
+        for (playing in listOf(false, true)) {
+            if (playing) playingHarbour()
+            for (theme in listOf(ThemePreset.NOCTORIUM_NIGHT, ThemePreset.CATPPUCCIN_LATTE, ThemePreset.WINDOWS_98, ThemePreset.WINDOWS_98_NOCTORIUM, ThemePreset.WINDOWS_XP)) {
+                state.setTheme(theme)
+                waitFor { state.settings.value.preferences.theme == theme }
+                for (bar in TuiPlayerBar.entries) {
+                    tui.preferences.playerBar = bar
+                    for ((w, h) in listOf(40 to 12, 61 to 19, 97 to 33, 220 to 70)) tui.frame(w, h)
+                }
+            }
+        }
+        assertEquals(PlaylistLayout.Tab.LYRICS, PlaylistLayout.shown)
     }
 
     @Test

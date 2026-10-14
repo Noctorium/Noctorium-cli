@@ -8,20 +8,33 @@ import app.noctorium.settings.ThemeSkin
 
 /**
  * Now playing's Playlist layout: a desktop music player's window. The cover in a panel of its own on the left; the
- * queue as a table with the columns chosen in Settings, under tabs -- the queue, and autoplay's songs when there are
- * some; an info bar under it with a small cover, the title set large, the artist and the album, and the visualiser;
- * and along the foot a status bar with what is playing -- "Opus, stereo, 48 kHz, 128 kbit/s" -- and how far into the
- * whole queue it is.
+ * queue as a table with the columns chosen in Settings, under tabs -- the queue, the lyrics of the song playing, and
+ * autoplay's songs when there are some; an info bar under it with a small cover, the title set large, the artist and
+ * the album, and the visualiser; and along the foot a status bar with what is playing -- "Opus, stereo, 48 kHz,
+ * 128 kbit/s" -- and how far into the whole queue it is.
  *
  * The table is a list like any other: the arrows choose a song, Enter plays it, and a track's keys work on it; [ and ]
- * change the tab. The 98 and XP themes draw it as theirs: the panels and the table sunk into the face, the table's
- * headings as raised header buttons, the tabs as tabs, and the status bar in sunken panes.
+ * change the tab. The lyrics are the other layouts' own, lit line by line as they are sung, the arrows scrolling them
+ * and a track's keys working on the song playing. The 98 and XP themes draw it as theirs: the panels and the table
+ * sunk into the face, the table's headings as raised header buttons, the tabs as tabs, and the status bar in sunken
+ * panes.
  */
 object PlaylistLayout {
-    /** The tabs over the table. */
-    enum class Tab { QUEUE, AUTOPLAY }
+    /**
+     * The tabs over the table, in their order. The lyrics come straight after the queue, ahead of autoplay's tab,
+     * which comes and goes, so they are always in the same place.
+     */
+    enum class Tab { QUEUE, LYRICS, AUTOPLAY }
 
     private var tab = Tab.QUEUE
+
+    /** The Lyrics tab, for the player bar's lyrics button to open the layout on. */
+    fun showLyrics() = choose(Tab.LYRICS)
+
+    /** The tab showing, for the tests, which share this layout between them and put it back as they found it. */
+    internal var shown: Tab
+        get() = tab
+        set(value) = choose(value)
 
     /** The chosen row, or null to follow the song playing; and how far the table is scrolled. */
     private var cursor: Int? = null
@@ -31,6 +44,9 @@ object PlaylistLayout {
     /** Rows of the table on screen last frame, by screen row, for clicks; and how many fitted. */
     private var tableTop = 0
     private var tableRows = 0
+
+    /** Lines of lyrics on screen last frame, for Page Up and Page Down. */
+    private var lyricsRows = 0
 
     fun draw(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int, h: Int) {
         val p = tui.palette
@@ -59,7 +75,7 @@ object PlaylistLayout {
         val tw = w - panelW - 2
         val tableH = bodyH - infoH - 1 - (if (infoH > 0) 1 else 0)
         tabs(tui, canvas, tx, y, tw)
-        table(tui, canvas, tx, y + 1, tw, tableH)
+        if (tab == Tab.LYRICS) lyrics(tui, canvas, tx, y + 1, tw, tableH) else table(tui, canvas, tx, y + 1, tw, tableH)
         if (infoH > 0) infoBar(tui, canvas, tx, y + bodyH - infoH - 1, tw, infoH, smallCover = tui.preferences.coverArt)
         if (statusH > 0) statusBar(tui, canvas, x, y + h - 1, w)
     }
@@ -82,12 +98,16 @@ object PlaylistLayout {
         }
     }
 
-    /** The tabs: the queue, and autoplay's songs while there are some. Clicking one shows it; [ and ] go between them. */
+    /**
+     * The tabs: the queue, the lyrics, and autoplay's songs while there are some. Clicking one shows it; [ and ] go
+     * between them.
+     */
     private fun tabs(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int) {
         val p = tui.palette
         val queue = tui.state.queue.state.value
         val tabs = buildList {
             add(Tab.QUEUE to "Queue (${queue.tracks.size})")
+            add(Tab.LYRICS to "Lyrics")
             if (queue.suggestions.isNotEmpty()) add(Tab.AUTOPLAY to "Autoplay (${queue.suggestions.size})")
         }
         var cx = x
@@ -104,7 +124,7 @@ object PlaylistLayout {
                     canvas.set(cx, y, Skin.LEFT, lit, face)
                     canvas.set(cx + used - 1, y, Skin.RIGHT, edge, face)
                     canvas.write(cx + 2, y, label, Skin.text(p), face, if (chosen) BOLD else 0)
-                    tui.clickTargets += Tui.ClickTarget(cx, y, used, 1) { tab = which; cursor = null }
+                    tui.clickTargets += Tui.ClickTarget(cx, y, used, 1) { choose(which) }
                     cx += used
                 }
             }
@@ -112,21 +132,48 @@ object PlaylistLayout {
                 tabs.forEach { (which, label) ->
                     val chosen = which == tab
                     val used = canvas.write(cx, y, " $label ", if (chosen) p.accent else p.subtext, if (chosen) p.selection else null, if (chosen) BOLD else 0)
-                    tui.clickTargets += Tui.ClickTarget(cx, y, used, 1) { tab = which; cursor = null }
+                    tui.clickTargets += Tui.ClickTarget(cx, y, used, 1) { choose(which) }
                     cx += used + 1
                 }
             }
         }
     }
 
-    /** The songs of the tab showing, with the index each has in its own list. */
+    /** Shows [which]: a table from the song playing, or the lyrics from the line being sung. */
+    private fun choose(which: Tab) {
+        tab = which
+        cursor = null
+        if (which == Tab.LYRICS) NowPlaying.unscroll()
+    }
+
+    /**
+     * The Lyrics tab: the song playing's lyrics as the classic layout shows them, the sources' chips over them, in
+     * the table's place -- in the Windows themes, in its white box. With nothing playing, what the tab is for.
+     */
+    private fun lyrics(tui: Tui, canvas: Canvas, x: Int, y: Int, w: Int, h: Int) {
+        val p = tui.palette
+        val skinned = p.skinned
+        if (skinned) Skin.well(canvas, p, x + 1, y, w - 2, h, top = false, foot = false)
+        val track = tui.state.playback.value.track
+        if (track == null) {
+            val middle = y + h / 2 - 1
+            canvas.writeCentred(x, w, middle, "Nothing playing", if (skinned) Skin.text(p) else p.subtext, null, BOLD)
+            canvas.writeCentred(x, w, middle + 2, "The words of the song playing are shown here, lit up as they are sung.", if (skinned) Skin.greyText(p) else p.faint)
+            return
+        }
+        NowPlaying.follow(tui, track)
+        lyricsRows = h - 3
+        NowPlaying.lyrics(tui, canvas, x + 3, y + 1, w - 6, h - 1, well = true)
+    }
+
+    /** The songs of the tab showing, with the index each has in its own list: the queue's, behind the lyrics. */
     private fun songs(tui: Tui): List<Track> {
         val queue = tui.state.queue.state.value
         return if (tab == Tab.AUTOPLAY) queue.suggestions else queue.tracks
     }
 
     /** Where the song playing is in the tab showing, or -1. */
-    private fun playingIndex(tui: Tui): Int = if (tab == Tab.QUEUE) tui.state.queue.state.value.currentIndex else -1
+    private fun playingIndex(tui: Tui): Int = if (tab == Tab.AUTOPLAY) -1 else tui.state.queue.state.value.currentIndex
 
     private fun width(column: QueueColumn): Int? = when (column) {
         QueueColumn.NUMBER -> 4
@@ -369,17 +416,55 @@ object PlaylistLayout {
         cursor = null
     }
 
-    /** The song chosen, as a list's row, for a track's keys to work on. */
+    /** The song chosen, as a list's row, for a track's keys to work on: behind the lyrics, the one playing. */
     private fun chosenRow(tui: Tui): Row.Song? {
         val queue = tui.state.queue.state.value
         val songs = songs(tui)
-        val index = (cursor ?: playingIndex(tui)).takeIf { it in songs.indices } ?: return null
+        val index = (if (tab == Tab.LYRICS) playingIndex(tui) else cursor ?: playingIndex(tui)).takeIf { it in songs.indices } ?: return null
         return if (tab == Tab.AUTOPLAY) Row.Song(songs[index], songs, PlaybackOrigin.QUEUE, suggestion = index)
         else Row.Song(songs[index], queue.tracks, PlaybackOrigin.QUEUE, queueIndex = index)
     }
 
-    /** The keys of this layout: the arrows choose, Enter plays, [ and ] change the tab, and a track's keys work on the one chosen. */
+    /**
+     * The Lyrics tab's own keys, as on the other layouts: the arrows scroll the words, Home goes back to the line
+     * being sung, R asks every source again, and o opens a source that only links to its lyrics. Null for a key that
+     * is not the lyrics'.
+     */
+    private fun lyricsKeys(tui: Tui, input: Input): Boolean? {
+        val state = tui.state
+        val page = (lyricsRows - 1).coerceAtLeast(1)
+        if (input is Input.Key) when (input.key) {
+            Keys.UP -> { NowPlaying.scroll(-1); return true }
+            Keys.DOWN -> { NowPlaying.scroll(1); return true }
+            Keys.PAGE_UP -> { NowPlaying.scroll(-page); return true }
+            Keys.PAGE_DOWN -> { NowPlaying.scroll(page); return true }
+            Keys.HOME -> { NowPlaying.unscroll(); return true }
+            // There is no song chosen behind the words to play or to go to the end of.
+            Keys.ENTER, Keys.END -> return true
+            else -> return null
+        }
+        if (input !is Input.Text) return null
+        val track = state.playback.value.track ?: return null
+        val keys = tui.keys
+        if (keys.action(input.char, KeyScope.NOW_PLAYING) == KeyAction.LYRICS_AGAIN) {
+            state.loadLyrics(track, forceRefresh = true)
+            tui.toast("Asking every source again…")
+            return true
+        }
+        if (keys.matches(input.char, KeyAction.OPEN_PAGE)) {
+            val lyrics = state.lyrics.value
+            val link = lyrics.outcomes.firstOrNull { it.provider == lyrics.selectedProvider }?.result?.sourceUrl
+            if (link != null) { state.openExternalUrl(link); return true }
+        }
+        return null
+    }
+
+    /**
+     * The keys of this layout: the arrows choose, Enter plays, [ and ] change the tab, and a track's keys work on the
+     * one chosen -- or, on the Lyrics tab, the lyrics' keys, and a track's keys on the song playing.
+     */
     fun handle(tui: Tui, input: Input): Boolean {
+        if (tab == Tab.LYRICS && input is Input.Key) lyricsKeys(tui, input)?.let { return it }
         val songs = songs(tui)
         val at = cursor ?: playingIndex(tui).coerceAtLeast(0)
         val page = (tableRows - 1).coerceAtLeast(1)
@@ -398,17 +483,18 @@ object PlaylistLayout {
         if (input !is Input.Text) return false
         val keys = tui.keys
         if (keys.matches(input.char, KeyAction.LYRICS_PREVIOUS) || keys.matches(input.char, KeyAction.LYRICS_NEXT)) {
-            val tabs = if (tui.state.queue.state.value.suggestions.isEmpty()) listOf(Tab.QUEUE) else Tab.entries
-            tab = tabs[(tabs.indexOf(tab) + (if (keys.matches(input.char, KeyAction.LYRICS_NEXT)) 1 else tabs.size - 1)) % tabs.size]
-            cursor = null
+            val tabs = if (tui.state.queue.state.value.suggestions.isEmpty()) Tab.entries - Tab.AUTOPLAY else Tab.entries
+            choose(tabs[(tabs.indexOf(tab) + (if (keys.matches(input.char, KeyAction.LYRICS_NEXT)) 1 else tabs.size - 1)) % tabs.size])
             return true
         }
+        if (tab == Tab.LYRICS) lyricsKeys(tui, input)?.let { return it }
         val row = chosenRow(tui) ?: return false
         return Tracks.handle(tui, row, input.char)
     }
 
-    /** Wheel: the table scrolls by moving the choice. */
+    /** Wheel: the table scrolls by moving the choice, and the lyrics by their lines. */
     fun scroll(tui: Tui, by: Int) {
+        if (tab == Tab.LYRICS) return NowPlaying.scroll(by)
         val songs = songs(tui)
         if (songs.isEmpty()) return
         cursor = ((cursor ?: playingIndex(tui).coerceAtLeast(0)) + by).coerceIn(0, songs.lastIndex)
