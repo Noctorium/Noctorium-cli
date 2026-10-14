@@ -197,6 +197,9 @@ class WebPlayer(
         state.settings.marks("settings")
         state.downloadState.marks("downloads")
         state.connect.marks("connect")
+        // The connect part says whether Connect is switched on, which is a setting: switched off where it was not
+        // running anyway -- signed out, say -- nothing else about Connect changes, and the page would not be told.
+        state.settings.map { it.preferences.connect.enabled }.distinctUntilChanged().marks("connect")
         state.signInTransfer.marks("signIn")
         state.account.marks("account")
         // While something plays in a browser, the next track's stream is found ahead of time.

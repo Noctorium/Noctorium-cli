@@ -49,7 +49,7 @@ noctorium web                   the web player, for any browser on your network
   bitrate and how far into the queue. The symbols are the terminal's own, plain ASCII, or a Nerd Font's icons
   (Font Awesome's, as Nerd Fonts patch them in; Noctorium ships no font, it only names their code points).
 - **Scrobbling** to Last.fm and ListenBrainz, Discord presence, downloads to keep, a sleep timer,
-  Noctorium Connect to move the music to another device.
+  Noctorium Connect to move the music to another device, switched on and off at the top of Devices.
 - **The web player.** `noctorium web`, or `w` inside the player, serves Noctorium to the browsers on your
   network. The music plays out of whichever device opened it — a phone in your pocket gets its lock-screen
   controls — or out of this computer's speakers, with the page as a remote. The same page, with nothing

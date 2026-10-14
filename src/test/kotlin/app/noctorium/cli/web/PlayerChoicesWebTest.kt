@@ -382,6 +382,65 @@ class PlayerChoicesWebTest {
     }
 
     @Test
+    fun `Noctorium Connect is switched from the page, which is told so even when nothing else about Connect changes`() {
+        // With nobody signed in to a Noctorium account, as here, Connect is not running either way: switching it
+        // changes the setting and nothing else, which is when the page used not to hear of it.
+        val player = WebPlayer(state, parts, engine).also { web = it }
+        assertNull(player.start(preferredPort = 20_000 + (System.nanoTime() % 20_000).toInt(), network = false))
+        val port = URI(player.localAddress!!).port
+        // Everything the page is sent, kept in order: the settings part and the connect part come in either order.
+        val received = CopyOnWriteArrayList<JsonObject>()
+        val socket = HttpClient.newHttpClient().newWebSocketBuilder()
+            .header("X-Noctorium-Key", player.key)
+            .buildAsync(
+                URI("ws://127.0.0.1:$port/api/live"),
+                object : WebSocket.Listener {
+                    private val buffer = StringBuilder()
+                    override fun onText(webSocket: WebSocket, data: CharSequence, last: Boolean): CompletionStage<*>? {
+                        buffer.append(data)
+                        if (last) {
+                            runCatching { Json.parseToJsonElement(buffer.toString()).jsonObject }.getOrNull()?.let(received::add)
+                            buffer.setLength(0)
+                        }
+                        webSocket.request(1)
+                        return null
+                    }
+                },
+            ).get(10, TimeUnit.SECONDS)
+        /** The [name] part's data, the first sent from the [from]th message on that [what] says yes to. */
+        fun part(name: String, from: Int, what: (JsonObject) -> Boolean): JsonObject {
+            var found: JsonObject? = null
+            waitFor {
+                found = received.drop(from)
+                    .filter { it.string("kind") == "part" && it.string("name") == name }
+                    .map { it.getValue("data").jsonObject }
+                    .firstOrNull(what)
+                found != null
+            }
+            return found!!
+        }
+        fun switch(on: Boolean, id: Int): Int {
+            val from = received.size
+            socket.sendText("""{"kind":"command","id":$id,"command":{"type":"connect","on":$on}}""", true).get(5, TimeUnit.SECONDS)
+            return from
+        }
+        fun enabled(data: JsonObject, key: String) = data.getValue(key).jsonPrimitive.boolean
+
+        assertTrue(enabled(part("connect", 0) { true }, "enabled"))
+        val off = switch(false, 11)
+        waitFor { !preferences.connect.enabled }
+        assertFalse(enabled(part("connect", off) { !enabled(it, "enabled") }, "available"))
+        part("settings", off) { !enabled(it, "connectEnabled") }
+        val on = switch(true, 12)
+        waitFor { preferences.connect.enabled }
+        part("connect", on) { enabled(it, "enabled") }
+        part("settings", on) { enabled(it, "connectEnabled") }
+        // Neither on nor off is not a switch.
+        assertEquals("On or off?", run("connect"))
+        socket.sendClose(WebSocket.NORMAL_CLOSURE, "done").get(5, TimeUnit.SECONDS)
+    }
+
+    @Test
     fun `the switch follows the output for the visualiser, and only while watched`() = runBlocking {
         assertEquals(0, computer.frames.subscriptionCount.value)
         computer.frames.value = AudioAnalysis(peaks = listOf(.5f), rms = listOf(.25f))

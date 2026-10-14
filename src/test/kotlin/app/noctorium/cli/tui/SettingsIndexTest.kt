@@ -115,6 +115,27 @@ class SettingsIndexTest {
     }
 
     @Test
+    fun `Noctorium Connect is found by what people say to switch it, and Enter there switches it`() {
+        fun first(query: String) = SettingsSearch.search(query, SettingsIndex.ENTRIES).firstOrNull()?.entry?.id
+        for (query in listOf("connect", "noctorium connect", "turn off connect", "disable connect", "turn connect on", "enable connect", "other devices")) {
+            assertEquals("connect", first(query), query)
+        }
+        tui.page = Page.SETTINGS
+        tui.press(Input.Text("/"))
+        "turn off connect".forEach { tui.press(Input.Text(it.toString())) }
+        val found = Pages.rows(tui).filterIsInstance<Row.Action>().first()
+        assertEquals("Noctorium Connect", found.label)
+        assertEquals(Settings.YOU, found.value)
+        tui.press(Input.Key(Keys.ENTER))
+        val chosen = Settings.rows(tui)[tui.list(Page.SETTINGS.name).selected] as Row.Action
+        assertEquals("connect", chosen.id)
+        assertEquals("On", chosen.value)
+        tui.press(Input.Key(Keys.ENTER))
+        BandcampStandIn.waitFor { !state.settings.value.preferences.connect.enabled }
+        assertEquals("Off", Settings.rows(tui).filterIsInstance<Row.Action>().first { it.id == "connect" }.value)
+    }
+
+    @Test
     fun `a setting shown only some of the time goes to the one it is shown with`() {
         tui.page = Page.SETTINGS
         tui.preferences.playerBar = TuiPlayerBar.FULL

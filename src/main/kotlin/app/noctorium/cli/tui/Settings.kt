@@ -87,6 +87,8 @@ object Settings {
                 id = "account",
             ),
         )
+        // The switch at the top of Devices, here too, where Settings is looked in for it: the desktop has it by the account.
+        add(connectSwitch(tui, detail = true))
         val scrobbling = settings.scrobbling
         add(
             Row.Action(
@@ -632,10 +634,75 @@ object Settings {
         }
     }
 
+    /**
+     * What Noctorium Connect on and off mean, in the desktop's words: said under its switch on Devices, and after it
+     * in Settings while it is chosen.
+     */
+    fun connectSays(on: Boolean): String =
+        if (on) "This computer finds your other devices, and they can find it."
+        else "Off: this computer is not looking for your other devices, and they cannot see it."
+
+    /** Noctorium Connect's switch, the same row on Devices and in Settings: Enter, a click or the arrows turn it on or off. */
+    private fun connectSwitch(tui: Tui, detail: Boolean): Row.Action {
+        val state = tui.state
+        val on = state.settings.value.preferences.connect.enabled
+        return Row.Action(
+            "Noctorium Connect",
+            value = onOff(on),
+            step = { state.setConnectEnabled(!on) },
+            detail = if (detail) connectSays(on) else null,
+            id = "connect",
+        )
+    }
+
+    /**
+     * Devices: Noctorium Connect's switch first, so whether this computer can be found at all is the first thing the
+     * page says; then, while it is on, what this computer is called and the other devices, and while it is off only
+     * that it is; then the web player.
+     */
     fun deviceRows(tui: Tui): List<Row> = buildList {
         val state = tui.state
         val connect = state.connect.value
         val preferences = state.settings.value.preferences
+        val on = preferences.connect.enabled
+        add(connectSwitch(tui, detail = false))
+        add(Row.Note(connectSays(on)))
+        if (on) {
+            add(
+                Row.Action("This device is called", value = connect.thisDevice.ifBlank { preferences.connect.deviceName.ifBlank { "This computer" } }, run = {
+                    tui.overlays.addLast(Overlay.Prompt("Device name", "What other devices see this one as.", connect.thisDevice) { if (it.isNotBlank()) state.renameThisDevice(it) })
+                }),
+            )
+            add(Row.Gap)
+            add(Row.Header("Your other devices"))
+            when {
+                !connect.available -> add(Row.Note("Connect needs your Noctorium account: sign in under Settings, on every device.", Row.Tone.WARN))
+                connect.devices.isEmpty() -> add(Row.Note("No other device found on this network yet. Open Noctorium on one."))
+            }
+            connect.target?.let { target ->
+                add(Row.Action("Playing on ${target.name}", value = "Enter brings it back here", tone = Row.Tone.ACCENT, run = { state.bringPlaybackBack() }))
+                add(Row.Action("Stop controlling ${target.name}", run = { state.stopControlling() }))
+            }
+            connect.controlledBy?.let { add(Row.Note("$it is playing music on this device.", Row.Tone.ACCENT)) }
+            connect.devices.forEach { peer ->
+                add(
+                    Row.Action(
+                        peer.name,
+                        value = if (connect.target?.id == peer.id) "playing there" else "Enter: play there",
+                        hint = peer.kind.name.lowercase(),
+                        tone = Row.Tone.NORMAL,
+                        run = { state.playOn(peer) },
+                    ),
+                )
+            }
+        } else {
+            // Off is a choice, not a fault: no list and nothing to put right, only what is so and how to undo it.
+            add(Row.Gap)
+            add(Row.Note("Noctorium Connect is off", Row.Tone.NORMAL))
+            add(Row.Note("Turn it on above to see your other devices here and play on them."))
+        }
+        add(Row.Gap)
+
         add(Row.Header("The web player"))
         val address = tui.web?.address
         add(
@@ -648,36 +715,6 @@ object Settings {
             ),
         )
         add(Row.Note("Starts a page this computer serves, for a phone, a tablet or another computer on your network. ${tui.key(KeyAction.WEB_PLAYER)} does the same anywhere."))
-        add(Row.Gap)
-
-        add(Row.Header("Noctorium Connect"))
-        add(Row.Action("Connect", value = onOff(preferences.connect.enabled), step = { state.setConnectEnabled(!preferences.connect.enabled) }))
-        add(
-            Row.Action("This device is called", value = connect.thisDevice.ifBlank { preferences.connect.deviceName.ifBlank { "This computer" } }, run = {
-                tui.overlays.addLast(Overlay.Prompt("Device name", "What other devices see this one as.", connect.thisDevice) { if (it.isNotBlank()) state.renameThisDevice(it) })
-            }),
-        )
-        when {
-            !preferences.connect.enabled -> add(Row.Note("Connect is off."))
-            !connect.available -> add(Row.Note("Connect needs your Noctorium account: sign in under Settings, on every device.", Row.Tone.WARN))
-            connect.devices.isEmpty() -> add(Row.Note("No other device found on this network yet. Open Noctorium on one."))
-        }
-        connect.target?.let { target ->
-            add(Row.Action("Playing on ${target.name}", value = "Enter brings it back here", tone = Row.Tone.ACCENT, run = { state.bringPlaybackBack() }))
-            add(Row.Action("Stop controlling ${target.name}", run = { state.stopControlling() }))
-        }
-        connect.controlledBy?.let { add(Row.Note("$it is playing music on this device.", Row.Tone.ACCENT)) }
-        connect.devices.forEach { peer ->
-            add(
-                Row.Action(
-                    peer.name,
-                    value = if (connect.target?.id == peer.id) "playing there" else "Enter: play there",
-                    hint = peer.kind.name.lowercase(),
-                    tone = Row.Tone.NORMAL,
-                    run = { state.playOn(peer) },
-                ),
-            )
-        }
     }
 
     private fun youTubeMenu(tui: Tui): Overlay {

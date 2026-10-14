@@ -21,6 +21,10 @@ object SettingsIndex {
     /** Every setting, in the order Settings lists them. Each [Row.Action] in [Settings.rows] has one of these ids. */
     val ENTRIES: List<SettingEntry> = listOf(
         entry("account", "Noctorium account", Settings.YOU, "Counts your listening, and lets Connect find your other devices.", "sign in", "log in", "login", "profile", "stats"),
+        entry(
+            "connect", "Noctorium Connect", Settings.YOU, "Whether this computer and your other devices find each other, to move the music between them.",
+            "turn off connect", "turn on connect", "disable connect", "enable connect", "devices", "other devices", "play on another device", "cast", "remote", "multiroom",
+        ),
         entry("lastfm", "Last.fm", Settings.YOU, "Scrobbles what you play to Last.fm.", "scrobble", "scrobbling", "lastfm"),
         entry("listenbrainz", "ListenBrainz", Settings.YOU, "Scrobbles what you play to ListenBrainz.", "scrobble", "scrobbling", "token"),
         entry("discord", "Discord shows what is playing", Settings.YOU, "Your Discord status shows the song.", "rich presence", "status", "activity"),
