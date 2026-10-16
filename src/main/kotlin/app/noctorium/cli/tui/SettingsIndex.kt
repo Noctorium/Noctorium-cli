@@ -18,6 +18,9 @@ object SettingsIndex {
     private fun entry(id: String, title: String, section: String, description: String = "", vararg keywords: String) =
         SettingEntry(id, title, section, description, keywords.toList())
 
+    /** What a scrobbler's sign-in link is looked for by: most often, after a browser that never opened. Above [ENTRIES], which uses it. */
+    private val SIGN_IN_LINK = arrayOf("copy link", "link", "open again", "browser did not open", "no browser", "address", "url")
+
     /** Every setting, in the order Settings lists them. Each [Row.Action] in [Settings.rows] has one of these ids. */
     val ENTRIES: List<SettingEntry> = listOf(
         entry("account", "Noctorium account", Settings.YOU, "Counts your listening, and lets Connect find your other devices.", "sign in", "log in", "login", "profile", "stats"),
@@ -26,6 +29,9 @@ object SettingsIndex {
             "turn off connect", "turn on connect", "disable connect", "enable connect", "devices", "other devices", "play on another device", "cast", "remote", "multiroom",
         ),
         entry("lastfm", "Last.fm", Settings.YOU, "Scrobbles what you play to Last.fm.", "scrobble", "scrobbling", "lastfm"),
+        entry("lastfmLink", "Last.fm sign-in link", Settings.YOU, "While Last.fm waits, the page to allow Noctorium on: to copy into a browser, or open again.", *SIGN_IN_LINK),
+        entry("librefm", "Libre.fm", Settings.YOU, "Scrobbles what you play to Libre.fm, the free and open Last.fm.", "libre.fm", "libre", "librefm", "scrobble", "scrobbling"),
+        entry("librefmLink", "Libre.fm sign-in link", Settings.YOU, "While Libre.fm waits, the page to allow Noctorium on: to copy into a browser, or open again.", *SIGN_IN_LINK),
         entry("listenbrainz", "ListenBrainz", Settings.YOU, "Scrobbles what you play to ListenBrainz.", "scrobble", "scrobbling", "token"),
         entry("discord", "Discord shows what is playing", Settings.YOU, "Your Discord status shows the song.", "rich presence", "status", "activity"),
 
@@ -80,9 +86,12 @@ object SettingsIndex {
 
     /**
      * Settings shown only some of the time, and the setting to go to instead while they are not, with why: the
-     * clock only with a taskbar, Spotify's playing only once signed in with Premium.
+     * clock only with a taskbar, Spotify's playing only once signed in with Premium, a scrobbler's sign-in link only
+     * while its sign-in waits.
      */
     val SHOWN_WITH: Map<String, Pair<String, String>> = mapOf(
+        "lastfmLink" to ("lastfm" to "The link is there while Last.fm waits for you to allow Noctorium"),
+        "librefmLink" to ("librefm" to "The link is there while Libre.fm waits for you to allow Noctorium"),
         "taskbarClock" to ("playerBar" to "The clock is there with the Taskbar, or a Windows theme"),
         "playerButtons" to ("playerBar" to "The buttons are there to choose with Toolbar 2"),
         "spotifyPlayback" to ("spotifyPremium" to "There once Spotify Premium is signed in"),

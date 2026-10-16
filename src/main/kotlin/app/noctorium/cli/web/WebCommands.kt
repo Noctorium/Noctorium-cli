@@ -294,6 +294,7 @@ class WebCommands(
                 "vk" -> state.disconnectVk()
                 "spotify" -> state.disconnectSpotify()
                 "lastfm" -> state.disconnectLastFm()
+                "librefm" -> state.disconnectLibreFm()
                 "listenbrainz" -> state.disconnectListenBrainz()
                 "noctorium" -> state.signOutOfNoctorium()
                 else -> return "Which service?"
@@ -322,8 +323,13 @@ class WebCommands(
             "spotifyDevice" -> state.chooseSpotifyDevice(command.string("id").orEmpty())
             // VK's session, pasted from a browser signed in on vk.ru; core checks it with VK before keeping it.
             "vkSignIn" -> state.completeVkSignIn(command.string("text")?.takeIf(String::isNotBlank) ?: return "No cookies")
+            // Last.fm's and Libre.fm's page opens in a browser on the computer running Noctorium, if it has one, and
+            // the page that asked has it in the settings part's approvalUrl to open or copy itself; allowed in any
+            // browser, the sign-in finishes by itself, or with Finish.
             "lastfm" -> state.beginLastFmLogin()
             "lastfmFinish" -> state.finishLastFmLogin()
+            "librefm" -> state.beginLibreFmLogin()
+            "librefmFinish" -> state.finishLibreFmLogin()
             "listenbrainz" -> state.connectListenBrainz(command.string("token") ?: return "No token")
             "noctoriumLogIn" -> state.logInToNoctorium(command.string("email") ?: return "No email", command.string("password") ?: return "No password")
             "noctoriumSignUp" -> state.signUpToNoctorium(command.string("email") ?: return "No email", command.string("password") ?: return "No password", command.string("name").orEmpty())

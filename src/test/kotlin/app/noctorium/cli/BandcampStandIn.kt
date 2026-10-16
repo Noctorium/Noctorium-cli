@@ -11,8 +11,10 @@ import app.noctorium.domain.SearchResults
 import app.noctorium.domain.Track
 import app.noctorium.playback.PlaybackEngine
 import app.noctorium.playback.PlaybackState
+import app.noctorium.platform.SystemBridge
 import app.noctorium.playback.QueueStore
 import app.noctorium.providers.MusicProvider
+import app.noctorium.scrobble.ScrobbleManager
 import app.noctorium.settings.AppDirectories
 import app.noctorium.settings.NoctoriumPreferences
 import app.noctorium.settings.SettingsRepository
@@ -82,12 +84,16 @@ object BandcampStandIn {
      * own, made afresh from [preferences] for each one. Its own, not shared: AppState saves in the background,
      * and a save the last test started can still be under way when the next one begins.
      * [more] are stand-ins for other services beside Bandcamp's; see [SpotifyStandIn] and [VkStandIn].
+     * [system] is what opening a page and the clipboard do -- the terminal's own, unless a test says -- and
+     * [scrobblers] the scrobblers, with sign-ins of the test's own making: see [ScrobblerStandIn].
      */
     fun state(
         parts: CliParts,
         engine: PlaybackEngine = Silent(),
         more: List<MusicProvider> = emptyList(),
         preferences: NoctoriumPreferences = NoctoriumPreferences(bandcampUsername = FAN),
+        system: SystemBridge = parts.bridge,
+        scrobblers: ScrobbleManager = ScrobbleManager(parts.credentials),
     ): AppState {
         val folder = AppDirectories.resolve("stand-in-settings") ?: error("No folder for the test's settings")
         Files.createDirectories(folder)
@@ -95,7 +101,8 @@ object BandcampStandIn {
         return AppState(
             ytDlp = parts.backend,
             credentials = parts.credentials,
-            system = parts.bridge,
+            system = system,
+            scrobbleManager = scrobblers,
             downloads = parts.downloads,
             playbackEngine = engine,
             injectedProviders = listOf<MusicProvider>(Provider()) + more,

@@ -545,6 +545,81 @@ class TuiRenderCheck {
     }
 
     /**
+     * Last.fm and Libre.fm in Settings: both waiting to be allowed, with their pages to copy or open again, under a dark
+     * theme, a light one and the Windows ones, wide and narrow; Libre.fm signed in beside Last.fm waiting; neither; the
+     * link Open again shows where no browser opened; and the search finding them. The sign-ins are made up and in
+     * memory, nothing plays, and the page and the clipboard are written down rather than opened and filled, so nothing
+     * reaches either service.
+     */
+    @Test
+    fun `the scrobblers' settings draw`() {
+        val folder = folder ?: return
+        folder.mkdirs()
+        val parts = CliParts()
+        val bridge = app.noctorium.cli.RecordingBridge()
+        fun open(stand: app.noctorium.cli.ScrobblerStandIn, preferences: NoctoriumPreferences = NoctoriumPreferences()): Pair<app.noctorium.core.AppState, Tui> {
+            val state = app.noctorium.cli.BandcampStandIn.state(parts, preferences = preferences, system = bridge, scrobblers = stand.scrobblers)
+            return state to Tui(state, parts, web = null).also { it.page = Page.SETTINGS }
+        }
+        val waiting = app.noctorium.cli.ScrobblerStandIn.Sign.WAITING
+        val signedIn = app.noctorium.cli.ScrobblerStandIn.Sign.SIGNED_IN
+
+        val (state, tui) = open(app.noctorium.cli.ScrobblerStandIn(lastFm = waiting, libreFm = waiting))
+        try {
+            waitFor(10_000) { state.settings.value.scrobbling.libreFm.approvalUrl != null && state.settings.value.scrobbling.lastFm.approvalUrl != null }
+            val themes = listOf(
+                ThemePreset.NOCTORIUM_NIGHT to "night",
+                ThemePreset.CATPPUCCIN_LATTE to "latte",
+                ThemePreset.WINDOWS_98 to "98",
+                ThemePreset.WINDOWS_XP to "xp",
+            )
+            for ((theme, name) in themes) {
+                state.setTheme(theme)
+                waitFor(5_000) { state.settings.value.preferences.theme == theme }
+                SettingsIndex.jump(tui, "lastfm")
+                write(folder, "scrobblers-waiting-$name", tui)
+                SettingsIndex.jump(tui, "librefmLink")
+                write(folder, "scrobblers-waiting-$name-copy", tui)
+                write(folder, "scrobblers-waiting-$name-narrow", tui, 84, 24)
+            }
+            state.setTheme(ThemePreset.NOCTORIUM_NIGHT)
+            // Where no browser opened: the link whole, to open on any device, as Open again shows it then.
+            tui.overlays.addLast(Overlay.Link(state.settings.value.scrobbling.libreFm.approvalUrl!!, opened = false))
+            write(folder, "scrobblers-link-overlay", tui)
+            tui.overlays.clear()
+            tui.settingsQuery = "libre"
+            tui.settingsSearchFocused = true
+            write(folder, "scrobblers-search-libre", tui)
+            tui.settingsQuery = "copy link"
+            write(folder, "scrobblers-search-copy-link", tui)
+            SettingsIndex.close(tui)
+        } finally {
+            state.close()
+        }
+
+        val stand = app.noctorium.cli.ScrobblerStandIn(lastFm = waiting, libreFm = signedIn)
+        val (signed, signedTui) = open(stand, NoctoriumPreferences(libreFmUsername = app.noctorium.cli.ScrobblerStandIn.LISTENER))
+        try {
+            waitFor(10_000) { signed.settings.value.scrobbling.libreFm.status == app.noctorium.settings.ScrobbleConnectionStatus.CONNECTED }
+            SettingsIndex.jump(signedTui, "librefm")
+            write(folder, "scrobblers-libre-signed-in", signedTui)
+            signedTui.press(Input.Key(Keys.ENTER))
+            write(folder, "scrobblers-libre-stop", signedTui)
+        } finally {
+            signed.close()
+        }
+
+        val (none, noneTui) = open(app.noctorium.cli.ScrobblerStandIn())
+        try {
+            Thread.sleep(500)
+            SettingsIndex.jump(noneTui, "librefm")
+            write(folder, "scrobblers-none", noneTui)
+        } finally {
+            none.close()
+        }
+    }
+
+    /**
      * The visualiser drawn from a real mpv measuring real sound, with nothing to hear: mpv plays to its null output
      * a sweep from the bass up over pink noise, made by ffmpeg, and the Playlist layout is drawn as it plays. Needs
      * `-Dnoctorium.live=true` as well, ffmpeg on the path, and mpv where `-Dnoctorium.mpv` says or on the path.

@@ -7,7 +7,60 @@ import app.noctorium.domain.Playlist
 import app.noctorium.domain.ProviderType
 import app.noctorium.domain.SearchResults
 import app.noctorium.domain.Track
+import app.noctorium.platform.SystemBridge
 import app.noctorium.providers.MusicProvider
+import app.noctorium.scrobble.ScrobbleManager
+import app.noctorium.settings.InMemorySecretStore
+import java.nio.file.Path
+import java.util.concurrent.CopyOnWriteArrayList
+
+/**
+ * Last.fm and Libre.fm as the credential store leaves them, with nothing ever asked of either: a sign-in waiting to be
+ * allowed, or one made, under made-up tokens and a made-up Last.fm application. Core reads which from the store as it
+ * opens, so the pages, the wire and the commands that only let go of a sign-in can be looked at off the network.
+ *
+ * Nothing played beside one of these may say it is playing: a scrobbler signed in would be sent the song.
+ */
+class ScrobblerStandIn(lastFm: Sign = Sign.NONE, libreFm: Sign = Sign.NONE) {
+    enum class Sign { NONE, WAITING, SIGNED_IN }
+
+    val credentials = InMemorySecretStore()
+
+    init {
+        // An application of the listener's own, as Settings can be given one: so a stored Last.fm sign-in is taken
+        // as made through the application this build signs in as, and the page to allow it on carries its key.
+        credentials.put("lastfm.api_key", APPLICATION)
+        credentials.put("lastfm.shared_secret", "fedcba9876543210fedcba9876543210")
+        keep("lastfm", lastFm)
+        keep("librefm", libreFm)
+    }
+
+    val scrobblers = ScrobbleManager(credentials)
+
+    private fun keep(name: String, sign: Sign) = when (sign) {
+        Sign.WAITING -> credentials.put("$name.pending", token(name))
+        Sign.SIGNED_IN -> credentials.put("$name.session", "made-up-$name-session")
+        Sign.NONE -> Unit
+    }
+
+    companion object {
+        /** Who a made-up sign-in is, kept in the settings as core keeps it. */
+        const val LISTENER = "sample-listener"
+        const val APPLICATION = "0123456789abcdef0123456789abcdef"
+
+        /** The token of a made-up sign-in waiting to be allowed on [name], "lastfm" or "librefm". */
+        fun token(name: String) = "made-up-$name-token"
+    }
+}
+
+/** What opening a page and the clipboard do, written down rather than done. */
+class RecordingBridge : SystemBridge {
+    val opened = CopyOnWriteArrayList<String>()
+    val copied = CopyOnWriteArrayList<String>()
+    override fun openUrl(url: String) { opened += url }
+    override fun copyToClipboard(text: String) { copied += text }
+    override fun defaultExportFolder(): Path? = null
+}
 
 /**
  * Spotify as its provider answers a search: songs, and its albums and artists as playlists to open, with

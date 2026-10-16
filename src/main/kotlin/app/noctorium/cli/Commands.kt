@@ -65,7 +65,7 @@ object Commands {
         |      --premium                   Premium: its songs play in your Spotify app
         |  noctorium login vk            VK, through a signed-in browser's session; says what that means
         |      --cookies <text|file>       "p=…; remixsid=…", or a cookies.txt holding them
-        |  noctorium logout <youtube|soundcloud|bandcamp|spotify|vk|lastfm|listenbrainz>
+        |  noctorium logout <youtube|soundcloud|bandcamp|spotify|vk|lastfm|librefm|listenbrainz>
         |  noctorium spotify devices     where your Spotify is open, to play its songs there (Premium)
         |  noctorium spotify device <name|any>
         |                                which of them plays Spotify songs
@@ -290,7 +290,7 @@ object Commands {
             else -> {
                 System.err.println(
                     "Sign in to youtube, soundcloud, spotify or vk, or name your Bandcamp collection: noctorium login bandcamp <name>. " +
-                        "Last.fm and ListenBrainz are under Settings in the player.",
+                        "Last.fm, Libre.fm and ListenBrainz are under Settings in the player.",
                 )
                 return 2
             }
@@ -731,7 +731,7 @@ object Commands {
     }
 
     private fun logout(options: List<String>): Int {
-        val service = options.firstOrNull()?.lowercase() ?: run { System.err.println("Sign out of which: youtube, soundcloud, bandcamp, spotify, vk, lastfm or listenbrainz?"); return 2 }
+        val service = options.firstOrNull()?.lowercase() ?: run { System.err.println("Sign out of which: youtube, soundcloud, bandcamp, spotify, vk, lastfm, librefm or listenbrainz?"); return 2 }
         val parts = parts()
         val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
         try {
@@ -754,6 +754,7 @@ object Commands {
                     return 0
                 }
                 "lastfm", "last.fm" -> state.disconnectLastFm()
+                "librefm", "libre.fm", "libre" -> state.disconnectLibreFm()
                 "listenbrainz" -> state.disconnectListenBrainz()
                 else -> { System.err.println("Not a service Noctorium signs in to: $service"); return 2 }
             }
@@ -806,7 +807,14 @@ object Commands {
             // The name is kept exactly as long as the session is, so it says without waiting for VK's own check.
             val vkName = settings.preferences.vkAccountName
             line("VK Music", vkName.isNotBlank(), vkName.ifBlank { "not signed in — noctorium login vk" })
-            line("Last.fm", settings.scrobbling.lastFm.status == ScrobbleConnectionStatus.CONNECTED, settings.scrobbling.lastFm.username ?: "not connected")
+            // A sign-in waiting to be allowed says where, whole: over ssh no browser opened, and it is for copying.
+            fun scrobbler(service: app.noctorium.settings.ScrobbleServiceState) = when {
+                service.status == ScrobbleConnectionStatus.CONNECTED -> service.username ?: "connected"
+                service.approvalUrl != null -> "waiting for you to allow Noctorium at ${service.approvalUrl}"
+                else -> "not connected"
+            }
+            line("Last.fm", settings.scrobbling.lastFm.status == ScrobbleConnectionStatus.CONNECTED, scrobbler(settings.scrobbling.lastFm))
+            line("Libre.fm", settings.scrobbling.libreFm.status == ScrobbleConnectionStatus.CONNECTED, scrobbler(settings.scrobbling.libreFm))
             line("ListenBrainz", settings.scrobbling.listenBrainz.status == ScrobbleConnectionStatus.CONNECTED, settings.scrobbling.listenBrainz.username ?: "not connected")
             println()
             PlaybackToolInstaller.refresh()

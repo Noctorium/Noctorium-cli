@@ -49,7 +49,7 @@ noctorium web                   the web player, for any browser on your network
   status bar with the codec, the bitrate and how far into the queue. The symbols are the terminal's own, plain
   ASCII, or a Nerd Font's icons (Font Awesome's, as Nerd Fonts patch them in; Noctorium ships no font, it only
   names their code points).
-- **Scrobbling** to Last.fm and ListenBrainz, Discord presence, downloads to keep, a sleep timer,
+- **Scrobbling** to Last.fm, Libre.fm and ListenBrainz, Discord presence, downloads to keep, a sleep timer,
   Noctorium Connect to move the music to another device, switched on and off at the top of Devices.
 - **The web player.** `noctorium web`, or `w` inside the player, serves Noctorium to the browsers on your
   network. The music plays out of whichever device opened it — a phone in your pocket gets its lock-screen
@@ -102,8 +102,9 @@ signed in, and never passes through anything but your own computer:
 | Your phone | `noctorium login youtube --phone` — scan the code with the Noctorium app |
 | Any signed-in browser | `noctorium login soundcloud --cookies cookies.txt` — an exported cookies.txt |
 
-All three are in the player too, under Settings (`8`). Spotify and Last.fm are approved in a browser as
-they are on the desktop.
+All three are in the player too, under Settings (`8`). Spotify, Last.fm and Libre.fm are approved in a
+browser as they are on the desktop. Where no browser opens, as over ssh, Settings shows Last.fm's and
+Libre.fm's page to copy into one on any device, and allowing Noctorium there connects it here.
 
 Bandcamp needs no sign-in at all, since a fan's collection is public: `noctorium login bandcamp <name>`,
 with the name from your `bandcamp.com/<name>` address, puts your collection and wishlist in the library, and
@@ -172,7 +173,7 @@ In the desktop's data folder, under `cli/` — `%LOCALAPPDATA%\Noctorium\cli` on
 `~/Library/Application Support/Noctorium/cli` on a Mac, `~/.local/share/noctorium/cli` on Linux — with its
 own settings, so the two never write over each other. The queue is kept there between launches, in
 `queue.json`, by the player and `noctorium web`; the other commands leave it alone. mpv and yt-dlp the desktop
-already downloaded are used rather than fetched again. Secrets (Spotify, Last.fm, VK's session) go to DPAPI on Windows, the Keychain on a
+already downloaded are used rather than fetched again. Secrets (Spotify, Last.fm, Libre.fm, VK's session) go to DPAPI on Windows, the Keychain on a
 Mac and the desktop keyring through `secret-tool` on Linux; on a machine with no keyring they are kept for the
 session only, never written to a file.
 
@@ -193,4 +194,4 @@ cd Noctorium-cli
 ---
 
 <sub>Free software under the GPL-3.0. Noctorium is an independent client and not affiliated with Google,
-YouTube, SoundCloud, Bandcamp, Spotify, VK, Last.fm, ListenBrainz or Discord.</sub>
+YouTube, SoundCloud, Bandcamp, Spotify, VK, Last.fm, Libre.fm, ListenBrainz or Discord.</sub>

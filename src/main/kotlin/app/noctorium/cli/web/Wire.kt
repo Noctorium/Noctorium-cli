@@ -22,6 +22,7 @@ import app.noctorium.settings.HomePlay
 import app.noctorium.settings.IconSet
 import app.noctorium.settings.ProgressBarStyle
 import app.noctorium.settings.QueueColumn
+import app.noctorium.settings.ScrobbleServiceState
 import app.noctorium.settings.ServiceBadgeStyle
 import app.noctorium.settings.ThemePreset
 import app.noctorium.settings.ThemeSkin
@@ -246,8 +247,14 @@ data class WLyrics(val trackKey: String? = null, val loading: Boolean, val sourc
 @Serializable
 data class WAccount(val status: String, val detail: String? = null, val hint: String? = null)
 
+/**
+ * A scrobbler: Last.fm, Libre.fm or ListenBrainz. While Last.fm or Libre.fm waits for Noctorium to be allowed,
+ * [approvalUrl] is the page to allow it on, for the page to open or copy in the listener's own browser.
+ */
 @Serializable
-data class WService(val status: String, val username: String? = null, val message: String? = null)
+data class WService(val status: String, val username: String? = null, val message: String? = null, val approvalUrl: String? = null)
+
+private fun ScrobbleServiceState.wire() = WService(status.name.lowercase(), username, message, approvalUrl)
 
 @Serializable
 data class WGenre(val name: String, val title: String)
@@ -419,6 +426,8 @@ data class WSettings(
     val serviceBadgeStyle: String = ServiceBadgeStyle.MARKS.name,
     val serviceBadgeStyles: List<WChoice> = emptyList(),
     val lastfm: WService,
+    /** Libre.fm, signed in to as Last.fm is. */
+    val librefm: WService,
     val listenbrainz: WService,
     val scrobbles: Int,
     val connectEnabled: Boolean,
@@ -664,8 +673,9 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
                     allGenres = BandcampGenre.entries.map { WGenre(it.name, it.displayName) },
                     desktop = desktopBandcamp,
                 ),
-                lastfm = WService(s.scrobbling.lastFm.status.name.lowercase(), s.scrobbling.lastFm.username, s.scrobbling.lastFm.message),
-                listenbrainz = WService(s.scrobbling.listenBrainz.status.name.lowercase(), s.scrobbling.listenBrainz.username, s.scrobbling.listenBrainz.message),
+                lastfm = s.scrobbling.lastFm.wire(),
+                librefm = s.scrobbling.libreFm.wire(),
+                listenbrainz = s.scrobbling.listenBrainz.wire(),
                 scrobbles = s.scrobbling.scrobblesThisSession,
                 connectEnabled = p.connect.enabled,
                 desktopYouTube = desktopYouTube,

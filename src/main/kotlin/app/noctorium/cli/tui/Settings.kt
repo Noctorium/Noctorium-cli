@@ -11,6 +11,7 @@ import app.noctorium.playback.PlaybackTool
 import app.noctorium.playback.PlaybackToolInstaller
 import app.noctorium.playback.ToolOrigin
 import app.noctorium.playback.VolumeBoost
+import app.noctorium.scrobble.AudioscrobblerSite
 import app.noctorium.settings.AccentPreset
 import app.noctorium.settings.EqualizerPreset
 import app.noctorium.settings.AccountConnectionStatus
@@ -20,6 +21,7 @@ import app.noctorium.settings.PlayerButton
 import app.noctorium.settings.ProgressBarStyle
 import app.noctorium.settings.QueueColumn
 import app.noctorium.settings.ScrobbleConnectionStatus
+import app.noctorium.settings.ScrobbleServiceState
 import app.noctorium.settings.DEFAULT_HYBRID_SEARCH
 import app.noctorium.settings.ThemePreset
 import app.noctorium.settings.ThemeSkin
@@ -90,26 +92,11 @@ object Settings {
         // The switch at the top of Devices, here too, where Settings is looked in for it: the desktop has it by the account.
         add(connectSwitch(tui, detail = true))
         val scrobbling = settings.scrobbling
-        add(
-            Row.Action(
-                "Last.fm",
-                value = when (scrobbling.lastFm.status) {
-                    ScrobbleConnectionStatus.CONNECTED -> "Scrobbling as ${scrobbling.lastFm.username.orEmpty()}"
-                    ScrobbleConnectionStatus.AWAITING_APPROVAL -> "Approve in the browser, then Enter"
-                    ScrobbleConnectionStatus.CONNECTING -> "Connecting…"
-                    ScrobbleConnectionStatus.ERROR -> scrobbling.lastFm.message ?: "Not working"
-                    ScrobbleConnectionStatus.DISCONNECTED -> "Not connected"
-                },
-                tone = scrobbleTone(scrobbling.lastFm.status),
-                run = {
-                    when (scrobbling.lastFm.status) {
-                        ScrobbleConnectionStatus.CONNECTED -> tui.overlays.addLast(Overlay.Confirm("Stop scrobbling to Last.fm?") { state.disconnectLastFm() })
-                        ScrobbleConnectionStatus.AWAITING_APPROVAL -> state.finishLastFmLogin()
-                        else -> state.beginLastFmLogin()
-                    }
-                },
-                id = "lastfm",
-            ),
+        addAll(
+            audioscrobbler(tui, AudioscrobblerSite.LAST_FM, scrobbling.lastFm, "lastfm", state::beginLastFmLogin, state::finishLastFmLogin, state::disconnectLastFm),
+        )
+        addAll(
+            audioscrobbler(tui, AudioscrobblerSite.LIBRE_FM, scrobbling.libreFm, "librefm", state::beginLibreFmLogin, state::finishLibreFmLogin, state::disconnectLibreFm),
         )
         add(
             Row.Action(
@@ -632,6 +619,56 @@ object Settings {
             val changed = all.filter { (it in ticked) != state.settings.value.preferences.desktop.showsPlayerButton(it) }
             if (changed.isNotEmpty()) state.updateDesktop { changed.fold(this) { desktop, button -> desktop.withPlayerButton(button, button in ticked) } }
         }
+    }
+
+    /**
+     * Last.fm or Libre.fm, which sign in the same way: Enter connects, finishes a sign-in waiting to be allowed, or asks
+     * before it stops scrobbling.
+     *
+     * While a sign-in waits, the page to allow Noctorium on is under it, whole, with Copy link -- for a browser of the
+     * listener's own, on this computer or another device -- and Open again. On Linux the browser often never opened,
+     * and over ssh none can; allowing Noctorium on the page from any browser connects it here by itself.
+     */
+    private fun audioscrobbler(
+        tui: Tui,
+        site: AudioscrobblerSite,
+        service: ScrobbleServiceState,
+        id: String,
+        connect: () -> Unit,
+        finish: () -> Unit,
+        disconnect: () -> Unit,
+    ): List<Row> = buildList {
+        val state = tui.state
+        val name = site.displayName
+        // Waiting on a page there is to allow it on. Core also says it waits after a Finish that found no sign-in
+        // begun at all, with nothing to allow: Enter then begins one.
+        val link = service.approvalUrl?.takeIf { service.status == ScrobbleConnectionStatus.AWAITING_APPROVAL }
+        add(
+            Row.Action(
+                name,
+                value = when {
+                    service.status == ScrobbleConnectionStatus.CONNECTED -> "Scrobbling as ${service.username.orEmpty()}"
+                    link != null -> "Allow Noctorium on its page"
+                    service.status == ScrobbleConnectionStatus.CONNECTING -> "Connecting…"
+                    service.status == ScrobbleConnectionStatus.DISCONNECTED -> "Not connected"
+                    else -> service.message ?: "Not working"
+                },
+                detail = "it connects by itself, or Enter".takeIf { link != null },
+                tone = scrobbleTone(service.status),
+                run = {
+                    when {
+                        service.status == ScrobbleConnectionStatus.CONNECTED -> tui.overlays.addLast(Overlay.Confirm("Stop scrobbling to $name?") { disconnect() })
+                        link != null -> finish()
+                        else -> connect()
+                    }
+                },
+                id = id,
+            ),
+        )
+        if (link == null) return@buildList
+        add(Row.Note(link, Row.Tone.ACCENT))
+        add(Row.Action("Copy link", hint = "For a browser here or on another device", run = { state.copyScrobblerSignInLink(site) }, id = "${id}Link"))
+        add(Row.Action("Open again", hint = "In this computer's browser", run = { state.openExternalUrl(link) }, id = "${id}Link"))
     }
 
     /**
