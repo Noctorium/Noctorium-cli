@@ -118,6 +118,15 @@ played matched on YouTube Music — or `noctorium login spotify --premium`, whic
 play them. Then `noctorium spotify devices` lists where Spotify is open, `noctorium spotify device <name|any>`
 picks one, and `noctorium spotify play-on <spotify|youtube>` switches between the two.
 
+Spotify reads nothing through its sign-in unless the Spotify app's owner has Premium, so there are two ways in
+that need none. `noctorium spotify follow <link>` follows a public playlist by the link from Share › Copy link
+to playlist, and keeps it in step with Spotify — only public playlists, and only their first 100 songs, which
+is all Spotify's public page shows; the page is Spotify's to change, and when it does this stops working until
+Noctorium is updated. `noctorium spotify import my_spotify_data.zip` imports the file Spotify sends when you ask
+for your Account data under Privacy settings on spotify.com: every playlist you made and your Liked Songs, as
+playlists here, as they were when Spotify made the file. Both are in Settings too, and in the web player's,
+with what each leaves out; a public playlist opened from its link can be kept from there with Keep in library.
+
 VK offers no music to other apps, so `noctorium login vk` uses your vk.ru session the way VK's own web
 player does: the `p` cookie from login.vk.ru and `remixsid` from vk.ru, copied from a browser signed in to
 VK, typed in when it asks or given with `--cookies "p=…; remixsid=…"`. That is against VK's terms, and VK

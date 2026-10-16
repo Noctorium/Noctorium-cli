@@ -6,6 +6,7 @@ import app.noctorium.cli.DesktopSignIn
 import app.noctorium.cli.TerminalBridge
 import app.noctorium.cli.cliVersion
 import app.noctorium.cli.update.CliUpdates
+import app.noctorium.domain.Playlist
 import app.noctorium.domain.ProviderType
 import app.noctorium.domain.betaWarning
 import app.noctorium.lyrics.LyricsProviderId
@@ -32,12 +33,18 @@ import app.noctorium.settings.VisualiserStyle
 import app.noctorium.settings.showsPlayerButton
 import app.noctorium.settings.themeSkin
 import app.noctorium.settings.withPlayerButton
+import app.noctorium.spotify.SPOTIFY_CUT_NOTE
+import app.noctorium.spotify.SPOTIFY_DATA_EXPORT_HOW
+import app.noctorium.spotify.SPOTIFY_DATA_EXPORT_LIMITS
+import app.noctorium.spotify.SPOTIFY_PUBLIC_PLAYLIST_LIMITS
+import app.noctorium.spotify.SpotifyPublicPlaylistState
 import app.noctorium.tidal.TidalAuth
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import java.nio.file.Files
 import java.nio.file.Path
 
 /**
@@ -428,7 +435,9 @@ object Settings {
                 ),
             )
         }
-        spotify.message?.let { add(Row.Note(it)) }
+        // Whole, wrapped: a sign-in Spotify refuses ends by naming the two ways in below, which need none.
+        spotify.message?.let { message -> wrapWords(message, WARNING_WIDTH).forEach { add(Row.Note(it)) } }
+        addAll(spotifyWithoutSignIn(tui))
         // Bandcamp is a name rather than a sign-in: it shows a fan's collection and wishlist to anybody. The name
         // is what is kept; the fan's own name for themselves is known once Bandcamp has confirmed it, here.
         val bandcamp = settings.bandcamp
@@ -914,6 +923,161 @@ object Settings {
             }
             tui.invalidate()
         }
+    }
+
+    /**
+     * Spotify with nobody signed in, for every listener whose sign-in Spotify refuses -- which it does unless the
+     * Spotify app's owner has Premium. Two ways in, under the sign-ins, which stay as they are:
+     *
+     * - public playlists, followed by their links and read afresh from their public pages with the library, under
+     *   core's words for what that can and cannot do ([SPOTIFY_PUBLIC_PLAYLIST_LIMITS]), in the warning's colour;
+     * - Spotify's own data download, imported from the path typed here as playlists of this computer's own, with
+     *   how to get one and what the import leaves out.
+     *
+     * Every song of either plays as its YouTube Music match, as a Spotify song does without Premium.
+     */
+    private fun spotifyWithoutSignIn(tui: Tui): List<Row> = buildList {
+        val state = tui.state
+        val spotify = state.settings.value.spotify
+        add(Row.Gap)
+        add(Row.Note("Public playlists, without signing in", Row.Tone.ACCENT))
+        wrapWords(SPOTIFY_PUBLIC_PLAYLIST_LIMITS, WARNING_WIDTH).forEach { add(Row.Note(it, Row.Tone.WARN)) }
+        val adding = spotify.addingPublicPlaylist
+        add(
+            Row.Action(
+                "Add a public playlist",
+                value = if (adding) "Reading its page on Spotify…" else "Enter, then paste its link",
+                tone = if (adding) Row.Tone.QUIET else Row.Tone.NORMAL,
+                run = {
+                    if (!state.settings.value.spotify.addingPublicPlaylist) {
+                        tui.overlays.addLast(
+                            Overlay.Prompt("Public Spotify playlist", "Its link, from Share › Copy link to playlist in Spotify.") { link ->
+                                if (link.isNotBlank()) followSpotifyPlaylist(tui, link, say = false)
+                            },
+                        )
+                    }
+                },
+                id = "spotifyPublic",
+            ),
+        )
+        spotify.publicMessage?.let { message -> wrapWords(message, WARNING_WIDTH).forEach { add(Row.Note(it)) } }
+        spotify.publicPlaylists.forEach { followed ->
+            add(
+                Row.Action(
+                    followed.title.ifBlank { followed.id },
+                    value = listOfNotNull(
+                        followed.owner.takeIf(String::isNotBlank),
+                        followed.songCount?.let { "$it ${if (it == 1) "song" else "songs"}" },
+                        SPOTIFY_CUT_NOTE.takeIf { followed.mayBeLonger },
+                        "not read yet".takeIf { followed.songCount == null && followed.lastError == null },
+                    ).joinToString(" · "),
+                    detail = "Enter opens it · Delete takes it out",
+                    tone = if (followed.lastError != null) Row.Tone.BAD else Row.Tone.NORMAL,
+                    run = { tui.overlays.addLast(followedMenu(tui, followed)) },
+                    remove = { tui.overlays.addLast(unfollow(tui, followed)) },
+                    id = "spotifyPublic",
+                ),
+            )
+            followed.lastError?.let { error -> wrapWords(error, WARNING_WIDTH).forEach { add(Row.Note(it, Row.Tone.BAD)) } }
+        }
+
+        add(Row.Gap)
+        add(Row.Note("Import from Spotify's data download", Row.Tone.ACCENT))
+        wrapWords(SPOTIFY_DATA_EXPORT_HOW, WARNING_WIDTH).forEach { add(Row.Note(it)) }
+        val import = spotify.dataImport
+        add(
+            Row.Action(
+                "Import Spotify's data download",
+                value = if (import.importing) import.progress ?: "Importing…" else "Enter, then the file's path",
+                tone = if (import.importing) Row.Tone.QUIET else Row.Tone.NORMAL,
+                run = {
+                    if (!state.settings.value.spotify.dataImport.importing) {
+                        tui.overlays.addLast(
+                            Overlay.Prompt("Spotify's data download", "The path of my_spotify_data.zip, or of a .json or folder from it.") { typed ->
+                                importSpotifyData(tui, typed)
+                            },
+                        )
+                    }
+                },
+                id = "spotifyImport",
+            ),
+        )
+        // What the last import came to, beside the row that began it; while one runs, the row says how far it is.
+        if (!import.importing) {
+            import.message?.let { message ->
+                wrapWords(message, WARNING_WIDTH).forEach { add(Row.Note(it, if (import.failed) Row.Tone.BAD else Row.Tone.GOOD)) }
+            }
+        }
+        wrapWords(SPOTIFY_DATA_EXPORT_LIMITS, WARNING_WIDTH).forEach { add(Row.Note(it)) }
+    }
+
+    /**
+     * Follows the public Spotify playlist at [link], for Settings' Add and for Keep in library over a pasted link.
+     * Core reads its page first, which takes a moment; with [say], what that came to is a toast as well -- for
+     * where Settings, which lists it, is not in sight.
+     */
+    fun followSpotifyPlaylist(tui: Tui, link: String, say: Boolean) {
+        val state = tui.state
+        state.addSpotifyPublicPlaylist(link)
+        if (!say) return
+        tui.toast("Reading the playlist's page on Spotify…")
+        io.launch {
+            withTimeoutOrNull(60_000) { state.settings.first { !it.spotify.addingPublicPlaylist } }
+            state.settings.value.spotify.publicMessage?.let { tui.toast(it, Row.Tone.NORMAL, 8) }
+            tui.invalidate()
+        }
+    }
+
+    /** A followed playlist chosen in Settings: opened in the library or on Spotify, or taken out of the library. */
+    private fun followedMenu(tui: Tui, followed: SpotifyPublicPlaylistState): Overlay {
+        val state = tui.state
+        return Overlay.Picker(
+            followed.title.ifBlank { "This playlist" },
+            listOf(
+                "Open it" to {
+                    // The library's own entry, with its cover and count, once the library has listed it.
+                    val listed = state.library.value.playlists.firstOrNull { it.provider == ProviderType.SPOTIFY && it.id == followed.id }
+                        ?: Playlist(followed.id, followed.title.ifBlank { followed.id }, ProviderType.SPOTIFY, sourceUrl = followed.url)
+                    tui.page = Page.LIBRARY
+                    tui.libraryOpen = true
+                    state.openPlaylist(listed)
+                },
+                "Open it on Spotify" to { state.openExternalUrl(followed.url) },
+                "Take it out of the library" to { tui.overlays.addLast(unfollow(tui, followed)) },
+            ),
+        )
+    }
+
+    private fun unfollow(tui: Tui, followed: SpotifyPublicPlaylistState): Overlay = Overlay.Confirm(
+        if (followed.title.isBlank()) "Take this playlist out of the library?" else "Take “${followed.title}” out of the library?",
+        "Nothing changes on Spotify; it is forgotten here.",
+    ) { tui.state.removeSpotifyPublicPlaylist(followed.id) }
+
+    /** Imports Spotify's data download from the path typed, once there is something there to import. */
+    private fun importSpotifyData(tui: Tui, typed: String) {
+        val path = spotifyImportPath(typed) ?: return
+        if (!Files.exists(path)) {
+            tui.toast("There is nothing at $path", Row.Tone.BAD, 8)
+            return
+        }
+        tui.state.importSpotifyData(path)
+    }
+
+    /**
+     * The file a path typed or pasted names, however it came: in quotes, as a terminal puts a file dragged into it,
+     * or -- on a Mac or Linux, [unix] -- with its spaces escaped; as a file: address; or under `~`, the home folder.
+     * Null for nothing at all. Shared with `noctorium spotify import`.
+     */
+    fun spotifyImportPath(typed: String, home: String? = System.getProperty("user.home"), unix: Boolean = java.io.File.separatorChar == '/'): Path? {
+        var text = typed.trim()
+        while (text.length >= 2 && (text.first() == '"' && text.last() == '"' || text.first() == '\'' && text.last() == '\'')) {
+            text = text.substring(1, text.length - 1).trim()
+        }
+        if (text.startsWith("file:", ignoreCase = true)) text = runCatching { Path.of(java.net.URI(text)).toString() }.getOrDefault(text)
+        if (unix) text = text.replace("\\ ", " ")
+        if (home != null && (text == "~" || text.startsWith("~/") || text.startsWith("~\\"))) text = home + text.substring(1)
+        if (text.isBlank()) return null
+        return runCatching { Path.of(text) }.getOrNull()
     }
 
     /**

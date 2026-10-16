@@ -19,12 +19,18 @@ import app.noctorium.playback.MpvPlaybackEngine
 import app.noctorium.playback.PlaybackTool
 import app.noctorium.playback.PlaybackToolInstaller
 import app.noctorium.playback.ToolOrigin
+import app.noctorium.playlists.PlaylistImport
 import app.noctorium.settings.AccountConnectionStatus
 import app.noctorium.settings.AutoplaySource
 import app.noctorium.settings.NoctoriumPreferences
 import app.noctorium.settings.ScrobbleConnectionStatus
 import app.noctorium.settings.SettingsRepository
 import app.noctorium.settings.SpotifyPlayback
+import app.noctorium.spotify.SPOTIFY_CUT_NOTE
+import app.noctorium.spotify.SPOTIFY_DATA_EXPORT_HOW
+import app.noctorium.spotify.SPOTIFY_DATA_EXPORT_LIMITS
+import app.noctorium.spotify.SPOTIFY_PUBLIC_PLAYLIST_LIMITS
+import app.noctorium.spotify.spotifyPlaylistIdIn
 import app.noctorium.tidal.TidalApplication
 import app.noctorium.update.Version
 import app.noctorium.vk.VkCookies
@@ -33,7 +39,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import java.nio.file.Files
@@ -82,6 +90,14 @@ object Commands {
         |                                which of them plays Spotify songs
         |  noctorium spotify play-on <spotify|youtube>
         |                                Spotify songs in your Spotify app, or matched on YouTube Music
+        |  noctorium spotify follow <link>
+        |                                a public Spotify playlist in your library, with no sign-in,
+        |                                kept in step with Spotify: its first 100 songs
+        |  noctorium spotify unfollow <link>
+        |                                takes one out of the library again
+        |  noctorium spotify import <file>
+        |                                your playlists and Liked Songs from Spotify's data download,
+        |                                my_spotify_data.zip, with no sign-in
         |  noctorium settings            how it plays; and to change one:
         |      speed <0.5–2>               slower or faster, keeping the pitch
         |      autoplay <on|off>           carry on with songs like the last when the queue runs out
@@ -639,19 +655,30 @@ object Commands {
     }
 
     /**
-     * `noctorium spotify …`: where Spotify songs play, for an account signed in with Premium. With nothing
-     * after it, how Spotify is set up now.
+     * `noctorium spotify …`: where Spotify songs play, for an account signed in with Premium; and the two ways in
+     * that need no sign-in at all, for the many Spotify turns away -- public playlists followed by their links, and
+     * Spotify's own data download imported. With nothing after it, how Spotify is set up now.
      */
     private fun spotify(options: List<String>): Int {
         val what = options.firstOrNull()?.lowercase()
+        val given = options.drop(1).joinToString(" ")
+        when (what) {
+            "follow" -> return spotifyFollow(given)
+            "unfollow" -> return spotifyUnfollow(given)
+            "import" -> return spotifyImport(given)
+        }
         if (what != null && what !in setOf("devices", "device", "play-on")) {
-            System.err.println("noctorium spotify devices, spotify device <name|any>, or spotify play-on <spotify|youtube>")
+            System.err.println(
+                "noctorium spotify devices, spotify device <name|any>, spotify play-on <spotify|youtube>, " +
+                    "spotify follow <link>, spotify unfollow <link> or spotify import <file>",
+            )
             return 2
         }
         val parts = parts()
         val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
         val out = Out()
         try {
+            if (what == null) return spotifyStatus(state, out)
             // The sign-in is read from the credential store in the background as AppState opens, and published
             // once that is done; nothing here is asked of Spotify before then.
             runBlocking { withTimeoutOrNull(4_000) { state.settings.first { it.spotify.connected } } }
@@ -659,12 +686,6 @@ object Commands {
             if (!spotify.connected) {
                 println("  ${out.warn("!")} Spotify is not connected: noctorium login spotify --premium")
                 return 1
-            }
-            if (what == null) {
-                println("  Spotify       connected${spotify.accountName.takeIf(String::isNotBlank)?.let { " as $it" }.orEmpty()}${if (spotify.canPlay) ", with Premium" else ""}")
-                println("  Its songs     ${if (spotify.playsOnSpotify) "play in your Spotify app" else "are matched on YouTube Music"}")
-                if (spotify.canPlay) println("  Played on     ${spotify.device.ifBlank { "wherever Spotify is active" }}")
-                return 0
             }
             if (what == "play-on") {
                 val onSpotify = when (options.getOrNull(1)?.lowercase()) {
@@ -732,6 +753,156 @@ object Commands {
         state.refreshSpotifyDevices()
         runBlocking { withTimeoutOrNull(10_000) { state.settings.first { it.spotify !== before } } }
         return state.settings.value.spotify.devices
+    }
+
+    /**
+     * `noctorium spotify`: the sign-in, where its songs play, and what is in the library without one -- the public
+     * playlists followed, each as it was last read, and what Spotify's data download was imported as.
+     */
+    private fun spotifyStatus(state: AppState, out: Out): Int {
+        // Both are read in the background as AppState opens: the sign-in, waited for when one is on record, and the
+        // followed playlists' last copies, from their file.
+        val preferences = state.settings.value.preferences
+        if (preferences.spotifyAccountName.isNotBlank()) {
+            runBlocking { withTimeoutOrNull(4_000) { state.settings.first { it.spotify.connected } } }
+        }
+        runBlocking { withTimeoutOrNull(3_000) { state.settings.first { it.spotify.publicPlaylists.size == preferences.spotifyPublicPlaylists.size } } }
+        val spotify = state.settings.value.spotify
+        if (spotify.connected) {
+            println("  Spotify       connected${spotify.accountName.takeIf(String::isNotBlank)?.let { " as $it" }.orEmpty()}${if (spotify.canPlay) ", with Premium" else ""}")
+            println("  Its songs     ${if (spotify.playsOnSpotify) "play in your Spotify app" else "are matched on YouTube Music"}")
+            if (spotify.canPlay) println("  Played on     ${spotify.device.ifBlank { "wherever Spotify is active" }}")
+        } else {
+            println("  Spotify       not connected: noctorium login spotify, or without a sign-in, as below")
+        }
+        val followed = spotify.publicPlaylists
+        println("  Followed      ${if (followed.isEmpty()) "no public playlists: noctorium spotify follow <link>" else "${followed.size} public ${if (followed.size == 1) "playlist" else "playlists"}, without a sign-in"}")
+        followed.forEach { playlist ->
+            val about = listOfNotNull(
+                playlist.owner.takeIf(String::isNotBlank),
+                playlist.songCount?.let { "$it ${if (it == 1) "song" else "songs"}" },
+                SPOTIFY_CUT_NOTE.takeIf { playlist.mayBeLonger },
+                playlist.lastError,
+            ).joinToString(" · ")
+            println("    ${if (playlist.lastError == null) out.good("●") else out.warn("!")} ${playlist.title.ifBlank { playlist.id }.padEnd(30)} ${out.dim(about)}")
+        }
+        val imported = state.library.value.localPlaylists.filter { it.importedFrom?.source == PlaylistImport.SPOTIFY_DATA }
+        println("  Imported      ${if (imported.isEmpty()) "nothing from Spotify's data download: noctorium spotify import <file>" else "${imported.size} ${if (imported.size == 1) "playlist" else "playlists"} from Spotify's data download"}")
+        return if (spotify.connected || followed.isNotEmpty() || imported.isNotEmpty()) 0 else 1
+    }
+
+    /**
+     * `noctorium spotify follow <link>`: a public Spotify playlist followed by its link, with nobody signed in, after
+     * saying what that can and cannot do, as every player says it beside the box that takes the link. Core reads
+     * the playlist's page before keeping it, and this waits for that.
+     */
+    private fun spotifyFollow(link: String): Int {
+        if (link.isBlank()) {
+            System.err.println("Which playlist: noctorium spotify follow <link>, with the link from Share › Copy link to playlist in Spotify.")
+            return 2
+        }
+        val out = Out()
+        println()
+        wrapWords(SPOTIFY_PUBLIC_PLAYLIST_LIMITS, 96).forEach { println("  ${out.warn(it)}") }
+        println()
+        val parts = parts()
+        val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
+        try {
+            val before = state.settings.value.preferences.spotifyPublicPlaylists
+            state.addSpotifyPublicPlaylist(link.trim())
+            // Set before the call returns, and cleared with what the page came to, which is always said.
+            runBlocking { withTimeoutOrNull(60_000) { state.settings.first { !it.spotify.addingPublicPlaylist } } }
+            val spotify = state.settings.value.spotify
+            if (spotify.addingPublicPlaylist) {
+                println("  ${out.warn("!")} Spotify's page did not answer in time. Try again in a moment.")
+                return 1
+            }
+            val now = state.settings.value.preferences.spotifyPublicPlaylists
+            // Followed now, or already: either way it is in the library.
+            val followed = (now - before.toSet()).isNotEmpty() || spotifyPlaylistIdIn(link)?.let { it in now } == true
+            if (now != before) saved { it.spotifyPublicPlaylists == now }
+            println("  ${if (followed) out.good("✓") else out.warn("!")} ${spotify.publicMessage ?: if (followed) "It is in your library." else "That playlist could not be added."}")
+            return if (followed) 0 else 1
+        } finally {
+            state.close()
+        }
+    }
+
+    /** `noctorium spotify unfollow <link>`: a followed public playlist taken out of the library. Nothing changes at Spotify. */
+    private fun spotifyUnfollow(given: String): Int {
+        if (given.isBlank()) {
+            System.err.println("Which playlist: noctorium spotify unfollow <link>, or its id. noctorium spotify lists them.")
+            return 2
+        }
+        val out = Out()
+        val parts = parts()
+        val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
+        try {
+            val id = spotifyPlaylistIdIn(given) ?: given.trim()
+            if (id !in state.settings.value.preferences.spotifyPublicPlaylists) {
+                println("  ${out.warn("!")} That playlist is not one followed here. noctorium spotify lists them.")
+                return 1
+            }
+            state.removeSpotifyPublicPlaylist(id)
+            saved { id !in it.spotifyPublicPlaylists }
+            // Said once its copy is forgotten, which happens in the background.
+            runBlocking { withTimeoutOrNull(3_000) { state.settings.first { it.spotify.publicMessage != null } } }
+            println("  ${out.good("✓")} ${state.settings.value.spotify.publicMessage ?: "Taken out of your library."} Nothing changed on Spotify.")
+            return 0
+        } finally {
+            state.close()
+        }
+    }
+
+    /**
+     * `noctorium spotify import <file>`: Spotify's own data download -- my_spotify_data.zip as Spotify sends it, a
+     * .json from inside it, or the folder it unpacks into -- imported as playlists of this computer's own, with
+     * nobody signed in to Spotify. The path may be in quotes, as a file dragged into a terminal is, or under `~`.
+     * Without one, how to get the file.
+     */
+    private fun spotifyImport(given: String): Int {
+        val out = Out()
+        val path = Settings.spotifyImportPath(given)
+        if (path == null) {
+            System.err.println("Which file: noctorium spotify import <my_spotify_data.zip>")
+            System.err.println()
+            wrapWords(SPOTIFY_DATA_EXPORT_HOW, 96).forEach { System.err.println("  $it") }
+            return 2
+        }
+        if (!Files.exists(path)) {
+            System.err.println("There is nothing at $path.")
+            return 2
+        }
+        val parts = parts()
+        val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
+        try {
+            state.importSpotifyData(path)
+            // How far it has got, a line at a time, until it is done; importing is set before the call returns.
+            runBlocking {
+                withTimeoutOrNull(10 * 60_000L) {
+                    state.settings.map { it.spotify.dataImport }.distinctUntilChanged().first { import ->
+                        if (import.importing) import.progress?.let { println(out.dim("  $it")) }
+                        !import.importing
+                    }
+                }
+            }
+            val import = state.settings.value.spotify.dataImport
+            if (import.importing) {
+                println("  ${out.warn("!")} The import was still going after ten minutes, and has stopped.")
+                return 1
+            }
+            println("  ${if (import.failed) out.warn("!") else out.good("✓")} ${import.message ?: "Done."}")
+            if (import.failed) return 1
+            println()
+            wrapWords(SPOTIFY_DATA_EXPORT_LIMITS, 96).forEach { println(out.dim("  $it")) }
+            println()
+            println(out.dim("  A player open in another terminal still has your playlists as they were: quit it and open it again"))
+            println(out.dim("  before changing any there."))
+            return 0
+        } finally {
+            // The playlists the import made are written as this closes, if they have not been already.
+            state.close()
+        }
     }
 
     /**

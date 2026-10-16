@@ -145,6 +145,29 @@ class SettingsIndexTest {
     }
 
     @Test
+    fun `Spotify without a sign-in is found by what its listeners would look for, and goes there`() {
+        fun first(query: String) = SettingsSearch.search(query, SettingsIndex.ENTRIES).firstOrNull()?.entry?.id
+        assertEquals("spotifyPublic", first("spotify public playlist"))
+        assertEquals("spotifyPublic", first("public playlist"))
+        assertEquals("spotifyPublic", first("without premium"))
+        assertEquals("spotifyImport", first("import spotify"))
+        assertEquals("spotifyImport", first("spotify data"))
+        assertEquals("spotifyImport", first("liked songs"))
+        assertEquals("spotifyImport", first("my_spotify_data"))
+        assertEquals("spotifyImport", first("download your data"))
+        // The sign-ins are found first by Spotify's name, as they were.
+        assertEquals("spotify", first("spotify"))
+        assertEquals("spotifyPremium", first("spotify premium"))
+        for ((query, id) in listOf("my_spotify_data" to "spotifyImport", "without premium" to "spotifyPublic")) {
+            tui.page = Page.SETTINGS
+            tui.press(Input.Text("/"))
+            query.forEach { tui.press(Input.Text(it.toString())) }
+            tui.press(Input.Key(Keys.ENTER))
+            assertEquals(id, (Settings.rows(tui)[tui.list(Page.SETTINGS.name).selected] as Row.Action).id, query)
+        }
+    }
+
+    @Test
     fun `a setting shown only some of the time goes to the one it is shown with`() {
         tui.page = Page.SETTINGS
         tui.preferences.playerBar = TuiPlayerBar.FULL

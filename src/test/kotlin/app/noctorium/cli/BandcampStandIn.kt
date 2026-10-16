@@ -13,12 +13,14 @@ import app.noctorium.playback.PlaybackEngine
 import app.noctorium.playback.PlaybackState
 import app.noctorium.platform.SystemBridge
 import app.noctorium.playback.QueueStore
+import app.noctorium.playlists.LocalPlaylistRepository
 import app.noctorium.providers.MusicProvider
 import app.noctorium.scrobble.ScrobbleManager
 import app.noctorium.settings.AppDirectories
 import app.noctorium.settings.NoctoriumPreferences
 import app.noctorium.settings.SecretStore
 import app.noctorium.settings.SettingsRepository
+import app.noctorium.spotify.SpotifyPublicCopies
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.nio.file.Files
@@ -88,7 +90,12 @@ object BandcampStandIn {
      * [system] is what opening a page and the clipboard do -- the terminal's own, unless a test says --
      * [scrobblers] the scrobblers, with sign-ins of the test's own making: see [ScrobblerStandIn] -- and
      * [credentials] where every other sign-in is kept, a store of the test's own where it makes them up: see
-     * [LaterServicesStandIn].
+     * [LaterServicesStandIn]. [spotifyCopies] are the last copies of the public Spotify playlists followed, in memory
+     * unless a test gives some of its own -- see [SpotifyPublicStandIn] -- and [playlists] where the local playlists
+     * are kept, which a test that imports some gives a file of its own.
+     *
+     * With [ownServices], core's own services stand in place of the stand-ins, and nothing is read at launch: for a
+     * test that has core's own Spotify find, with nothing asked of Spotify, that a followed playlist cannot be read.
      */
     fun state(
         parts: CliParts,
@@ -98,6 +105,9 @@ object BandcampStandIn {
         system: SystemBridge = parts.bridge,
         scrobblers: ScrobbleManager = ScrobbleManager(parts.credentials),
         credentials: SecretStore = parts.credentials,
+        spotifyCopies: SpotifyPublicCopies = SpotifyPublicCopies(null),
+        playlists: LocalPlaylistRepository = LocalPlaylistRepository(),
+        ownServices: Boolean = false,
     ): AppState {
         val folder = AppDirectories.resolve("stand-in-settings") ?: error("No folder for the test's settings")
         Files.createDirectories(folder)
@@ -109,9 +119,12 @@ object BandcampStandIn {
             scrobbleManager = scrobblers,
             downloads = parts.downloads,
             playbackEngine = engine,
-            injectedProviders = listOf<MusicProvider>(Provider()) + more,
+            injectedProviders = if (ownServices) null else listOf<MusicProvider>(Provider()) + more,
             settingsRepository = settings,
+            playlistRepository = playlists,
+            spotifyPublicCopies = spotifyCopies,
             checkForUpdatesAtLaunch = false,
+            refreshAtLaunch = !ownServices,
             // No queue kept between tests: one test's queue put back into the next would be a queue nobody made.
             queueStore = QueueStore(null),
             sessionNamespace = "cli",

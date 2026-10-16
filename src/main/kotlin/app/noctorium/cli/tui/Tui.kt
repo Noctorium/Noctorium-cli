@@ -5,6 +5,8 @@ import app.noctorium.cli.TerminalBridge
 import app.noctorium.cli.cliVersion
 import app.noctorium.cli.update.CliUpdates
 import app.noctorium.core.AppState
+import app.noctorium.core.LinkState
+import app.noctorium.core.LinkStatus
 import app.noctorium.domain.Track
 import app.noctorium.playback.AudioAnalysis
 import app.noctorium.playback.PlaybackStatus
@@ -107,6 +109,12 @@ class Tui(
     /** The search box: what is typed, and whether the keys go to it. */
     internal var searchText = ""
     internal var searchFocused = false
+
+    /**
+     * What the link pasted last came to, for Search to say: core's own, unless a test says of its own -- a public
+     * Spotify playlist opened from its link, say, which only Spotify's own page can make.
+     */
+    internal var pastedLink: () -> LinkState = { state.linkState.value }
 
     /** Whether the playlist list or an open playlist is showing on the library page. */
     internal var libraryOpen = false
@@ -211,6 +219,19 @@ class Tui(
         scope.launch { state.downloadState.collect { d -> d.message?.let { toast(it); state.clearDownloadMessage() } } }
         scope.launch { state.connect.collect { c -> c.message?.let { toast(it); state.dismissConnectMessage() } } }
         scope.launch { state.account.collect { a -> a.message?.let { toast(it); state.clearNoctoriumMessage() } } }
+        // A pasted link that could not be opened says why -- a Spotify song with nobody signed in, say, where a
+        // playlist or an album opens from its public page -- and a public Spotify playlist that could be kept says
+        // where, when Search, which offers it, is not in sight.
+        scope.launch {
+            state.linkState.map { Triple(it.status, it.message, it.canKeepInLibrary) }.distinctUntilChanged().collect { (status, message, keepable) ->
+                when {
+                    status == LinkStatus.FAILED && message != null -> toast(message, Row.Tone.WARN, 8)
+                    status == LinkStatus.DONE && keepable && page != Page.SEARCH ->
+                        toast("A public Spotify playlist: Search (${key(KeyAction.PAGE_SEARCH)}) can keep it in your library", Row.Tone.NORMAL, 8)
+                }
+                dirty.set(true)
+            }
+        }
         // Updates are [CliUpdates]'s here, not AppState's, which does not check at launch in a terminal.
         scope.launch { state.updates.collect { u -> u.message?.let { toast(it); state.clearUpdateMessage() } } }
         scope.launch {

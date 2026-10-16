@@ -70,6 +70,15 @@ object SettingsIndex {
         entry("spotifyPremium", "Spotify Premium", Settings.SERVICES, "Spotify songs played in your own Spotify app.", "premium", "connect", "spotify app"),
         entry("spotifyPlayback", "Spotify songs play", Settings.SERVICES, "On Spotify, or matched on YouTube Music.", "spotify connect", "matched"),
         entry("spotifyDevice", "Spotify plays on", Settings.SERVICES, "Which of the places Spotify is open plays its songs.", "spotify device", "speaker"),
+        // Spotify for the listeners its sign-in turns away: found by what they would look for, Premium and all.
+        entry(
+            "spotifyPublic", "Public Spotify playlists", Settings.SERVICES, "Public Spotify playlists followed by their links, with no sign-in, kept in step with Spotify.",
+            "spotify public playlist", "public playlist", "follow a playlist", "playlist link", "spotify link", "without premium", "no premium", "without signing in", "no sign in",
+        ),
+        entry(
+            "spotifyImport", "Import Spotify's data download", Settings.SERVICES, "Your Spotify playlists and Liked Songs, from the file Spotify sends you, as playlists here.",
+            "import spotify", "spotify data", "my_spotify_data", "liked songs", "download your data", "spotify export", "account data", "zip", "without premium", "transfer playlists",
+        ),
         entry("bandcamp", "Bandcamp collection", Settings.SERVICES, "A fan's collection and wishlist in the library.", "bandcamp", "fan", "collection", "bc"),
         entry("bandcampGenres", "Bandcamp on Home", Settings.SERVICES, "Which genres Home has a row of Bandcamp's best-sellers for.", "genres", "home"),
         entry("vk", "VK Music", Settings.SERVICES, "Sign in with a browser's vk.ru session.", "vk", "vkontakte", "sign in", "cookies"),

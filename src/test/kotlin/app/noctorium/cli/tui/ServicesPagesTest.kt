@@ -118,7 +118,7 @@ class ServicesPagesTest {
     fun `Settings has both Spotify sign-ins, where its songs play, VK, and the ways of listening`() {
         waitFor { state.settings.value.spotify.canPlay && state.settings.value.vk.connected }
         tui.page = Page.SETTINGS
-        val page = drawn("settings", h = 100)
+        val page = drawn("settings", h = 140)
         fun row(label: String) = page.firstOrNull { it.trim().startsWith(label) || it.trim().startsWith("› $label") } ?: ""
         assertTrue("Not connected" in row("Spotify "), page.joinToString("\n"))
         assertTrue("Signed in: Spotify songs can play in your Spotify app" in row("Spotify Premium"), row("Spotify Premium"))

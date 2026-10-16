@@ -1,6 +1,8 @@
 package app.noctorium.cli.tui
 
 import app.noctorium.cli.AutoplayState
+import app.noctorium.core.LinkState
+import app.noctorium.core.LinkStatus
 import app.noctorium.core.SearchMode
 import app.noctorium.domain.PlaybackOrigin
 import app.noctorium.domain.Playlist
@@ -185,6 +187,8 @@ object Pages {
     private fun searchRows(tui: Tui): List<Row> = buildList {
         val ui = tui.state.ui.value
         val results = ui.searchResults
+        // A link pasted into the box is opened rather than searched for, and what it opened is said above anything found.
+        addAll(pastedLinkRows(tui, tui.pastedLink()))
         if (ui.searchQuery.isBlank()) {
             add(Row.Note("Type what you are looking for. Every service is searched at once; Tab changes which."))
             add(Row.Note("Or one service for one search: !ytm, !sc, !sp, !bc, !vk, !am, !dz or !td before or after the words, !all for every one."))
@@ -246,6 +250,28 @@ object Pages {
         tui.searchText = query
         tui.state.search(query)
         tui.list("SEARCH").selected = 0
+    }
+
+    /**
+     * The link pasted last, while it is a public Spotify playlist the library does not follow yet -- opened from its
+     * public page, with nobody signed in. Keep in library follows it, as Settings' public playlists are followed: in
+     * the library from then on, read afresh from its page with it. Nothing for any other link.
+     */
+    internal fun pastedLinkRows(tui: Tui, link: LinkState): List<Row> = buildList {
+        val url = link.link?.url ?: return@buildList
+        if (link.status != LinkStatus.DONE || !link.canKeepInLibrary) return@buildList
+        add(Row.Header("The link you pasted", "a public Spotify playlist"))
+        link.message?.let { message -> wrapWords(message, Settings.WARNING_WIDTH).forEach { add(Row.Note(it)) } }
+        val adding = tui.state.settings.value.spotify.addingPublicPlaylist
+        add(
+            Row.Action(
+                "Keep in library",
+                value = if (adding) "Reading its page on Spotify…" else "Follow it without signing in, kept in step with Spotify",
+                tone = if (adding) Row.Tone.QUIET else Row.Tone.ACCENT,
+                run = { if (!tui.state.settings.value.spotify.addingPublicPlaylist) Settings.followSpotifyPlaylist(tui, url, say = true) },
+            ),
+        )
+        add(Row.Gap)
     }
 
     private fun libraryRows(tui: Tui): List<Row> = buildList {

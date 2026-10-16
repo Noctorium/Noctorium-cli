@@ -36,6 +36,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.floatOrNull
+import java.io.InputStream
 
 /**
  * What the page can ask for, each one the call the desktop's own button makes.
@@ -50,6 +51,8 @@ class WebCommands(
     private val scope: CoroutineScope,
     /** The settings page's "Check for updates", which is the terminal player's own updater here. */
     private val checkForUpdates: () -> Unit = { state.checkForUpdates() },
+    /** The largest upload of Spotify's data download taken: [SPOTIFY_IMPORT_MOST_BYTES], or a test's own. */
+    private val importLimit: Long = SPOTIFY_IMPORT_MOST_BYTES,
     private val notice: (String) -> Unit,
 ) {
     /** Does [command]. Returns null when it was understood, or why not. */
@@ -326,6 +329,13 @@ class WebCommands(
             "spotifyPlayback" -> state.setSpotifyPlayback(command.bool("onSpotify") ?: return "On Spotify or not?")
             "spotifyDevices" -> state.refreshSpotifyDevices()
             "spotifyDevice" -> state.chooseSpotifyDevice(command.string("id").orEmpty())
+            // A public Spotify playlist followed with nobody signed in: by the link from Spotify's share button, a
+            // spotify: URI, the bare id, or a pasted link's own address for Keep in library. Core reads its page
+            // before keeping it and says how that went in the settings part's publicMessage. Taking one out, by its
+            // id or its link, changes nothing at Spotify. Spotify's data download comes as an upload: see
+            // importSpotifyData.
+            "spotifyPublicAdd" -> state.addSpotifyPublicPlaylist(command.string("link")?.takeIf(String::isNotBlank) ?: return "No link")
+            "spotifyPublicRemove" -> state.removeSpotifyPublicPlaylist(command.string("id")?.takeIf(String::isNotBlank) ?: return "Which playlist?")
             // VK's session, pasted from a browser signed in on vk.ru; core checks it with VK before keeping it.
             "vkSignIn" -> state.completeVkSignIn(command.string("text")?.takeIf(String::isNotBlank) ?: return "No cookies")
             // Apple Music's media-user-token, pasted from a signed-in browser, or a Cookie: line with it in; core
@@ -352,6 +362,41 @@ class WebCommands(
             else -> return "Not a command: $type"
         }
         return null
+    }
+
+    /**
+     * Spotify's data download, as the page uploads it: [fileName] is what the file was called in the listener's
+     * browser, [declared] the length the request gave, if it gave one, and [body] the file. Returns null once the
+     * import has begun -- how it goes is in the settings part's `dataImport` -- or why it has not.
+     *
+     * The file is read whole into memory, which is what core imports a browser's upload from, so there is a ceiling:
+     * [importLimit], far above any download Spotify sends, which is a few megabytes, and far below what would trouble
+     * this program. A file that says it is larger is turned away before any of it is read, and one that turns out to
+     * be is turned away as soon as it has gone past the ceiling, the rest of it unread.
+     */
+    fun importSpotifyData(fileName: String?, declared: Long?, body: InputStream): String? {
+        if (state.settings.value.spotify.dataImport.importing) return "An import of Spotify's data is under way already. Wait for it to finish first."
+        // Its name alone, whatever a browser put in front of it: core goes by it to tell a .zip from a .json.
+        val name = fileName?.substringAfterLast('/')?.substringAfterLast('\\')?.trim()?.take(120)?.takeIf(String::isNotBlank)
+            ?: "my_spotify_data.zip"
+        if (declared != null && declared > importLimit) return tooLarge(name, declared)
+        val bytes = body.readNBytes((importLimit + 1).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+        if (bytes.size > importLimit) return tooLarge(name, null)
+        if (bytes.isEmpty()) return "$name is empty. Choose my_spotify_data.zip, the file Spotify emailed you a link to."
+        state.importSpotifyData(bytes, name)
+        return null
+    }
+
+    private fun tooLarge(name: String, size: Long?): String =
+        "$name is ${if (size != null) megabytes(size) else "more than ${megabytes(importLimit)}"}, and the import takes " +
+            "${megabytes(importLimit)} at most. Spotify's data download is a few megabytes: choose my_spotify_data.zip, " +
+            "the file Spotify emailed you a link to."
+
+    /** "50 MB", "1.5 MB", "300 KB": what a size is called, near enough. */
+    private fun megabytes(bytes: Long): String = when {
+        bytes >= 10L * 1024 * 1024 -> "${bytes / (1024 * 1024)} MB"
+        bytes >= 1024 * 1024 -> "%.1f MB".format(java.util.Locale.ROOT, bytes / (1024.0 * 1024))
+        else -> "${(bytes + 1023) / 1024} KB"
     }
 
     /**
@@ -400,6 +445,15 @@ class WebCommands(
         val ui = state.ui.value
         ui.searchResults.playlists.firstOrNull { it.playlistKey == key }?.let { return it }
         return ui.homeSections.asSequence().flatMap { it.playlists }.firstOrNull { it.playlistKey == key }
+    }
+
+    companion object {
+        /**
+         * The largest upload of Spotify's data download taken: 50 MB. Spotify's "Account data" download is a few
+         * megabytes, so a file larger than this is some other file -- the extended streaming history, say, which has
+         * no playlists in it.
+         */
+        const val SPOTIFY_IMPORT_MOST_BYTES = 50L * 1024 * 1024
     }
 }
 

@@ -299,7 +299,7 @@ class QueuePagesTest {
     fun `Settings has where autoplay draws from, whether it skips songs played lately, and keeping the queue`() {
         tui.page = Page.SETTINGS
         fun row(page: List<String>, label: String) = page.firstOrNull { it.trim().startsWith(label) || it.trim().startsWith("› $label") } ?: ""
-        val page = drawn(render("settings", h = 100))
+        val page = drawn(render("settings", h = 140))
         assertTrue("The same service" in row(page, "Autoplay draws from"), page.joinToString("\n"))
         assertTrue(row(page, "Autoplay skips songs played lately").endsWith("On"), row(page, "Autoplay skips songs played lately"))
         assertTrue("On: it is back where it was left" in row(page, "Keep the queue between launches"), row(page, "Keep the queue between launches"))
@@ -312,7 +312,7 @@ class QueuePagesTest {
             val p = state.settings.value.preferences
             p.autoplayFrom == AutoplaySource.YOUTUBE_MUSIC && !p.autoplayAvoidRecent && !p.keepQueue
         }
-        val changed = drawn(render("settings-changed", h = 100))
+        val changed = drawn(render("settings-changed", h = 140))
         assertTrue("YouTube Music radio" in row(changed, "Autoplay draws from"), changed.joinToString("\n"))
         assertTrue(row(changed, "Autoplay skips songs played lately").endsWith("Off"), row(changed, "Autoplay skips songs played lately"))
         assertTrue(row(changed, "Keep the queue between launches").endsWith("Off"), row(changed, "Keep the queue between launches"))

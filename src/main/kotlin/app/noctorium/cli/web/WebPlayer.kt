@@ -21,12 +21,15 @@ import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
+import io.ktor.server.request.contentLength
 import io.ktor.server.request.path
+import io.ktor.server.request.receiveStream
 import io.ktor.server.response.header
 import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondRedirect
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.get
+import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.pingPeriod
@@ -48,6 +51,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -202,6 +206,7 @@ class WebPlayer(
         state.settings.map { it.preferences.connect.enabled }.distinctUntilChanged().marks("connect")
         state.signInTransfer.marks("signIn")
         state.account.marks("account")
+        state.linkState.marks("link")
         // While something plays in a browser, the next track's stream is found ahead of time.
         scope.launch {
             state.playback.map { it.status to it.track?.queueKey }.distinctUntilChanged().collect { (status, _) ->
@@ -231,6 +236,11 @@ class WebPlayer(
         scope.launch { state.downloadState.collect { it.message?.let { m -> notice(m) } } }
         scope.launch { state.connect.collect { it.message?.let { m -> notice(m) } } }
         scope.launch { state.settings.collect { it.message?.let { m -> notice(m) } } }
+        // What adding or taking out a public Spotify playlist came to, for a page that did it from somewhere other
+        // than Settings -- Keep in library, over a pasted link -- and would not otherwise hear. Settings says it too.
+        scope.launch {
+            state.settings.map { it.spotify.publicMessage }.distinctUntilChanged().collect { it?.let { m -> notice(m) } }
+        }
         val previous = parts.bridge.notices
         parts.bridge.notices = { n ->
             previous(n)
@@ -318,11 +328,21 @@ class WebPlayer(
                 if (!authorised(call)) return@get call.respondText("Unauthorised", status = HttpStatusCode.Unauthorized)
                 call.respondText(buildJsonObject { put("address", address); put("local", localAddress) }.toString(), ContentType.Application.Json)
             }
+            // Spotify's data download, from the file the page chose: its bytes as they are, its name in the address.
+            // The same key as every command, and only from the page this program served, as /api/live is.
+            post("/api/spotify/import") {
+                if (!authorised(call) || !fromThisPage(call)) {
+                    return@post call.respondText("""{"error":"No key"}""", ContentType.Application.Json, HttpStatusCode.Unauthorized)
+                }
+                val problem = withContext(Dispatchers.IO) {
+                    val length = call.request.contentLength()
+                    call.receiveStream().use { body -> commands.importSpotifyData(call.request.queryParameters["name"], length, body) }
+                }
+                val reply = buildJsonObject { if (problem == null) put("ok", true) else put("error", problem) }
+                call.respondText(reply.toString(), ContentType.Application.Json, if (problem == null) HttpStatusCode.OK else HttpStatusCode.BadRequest)
+            }
             webSocket("/api/live") {
-                // Only from the page this program served: a cookie alone could be sent along by another site.
-                val origin = call.request.headers[HttpHeaders.Origin]
-                val hostHeader = call.request.headers[HttpHeaders.Host]
-                if (!authorised(call) || (origin != null && hostHeader != null && !origin.endsWith("//$hostHeader"))) {
+                if (!authorised(call) || !fromThisPage(call)) {
                     close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "No key"))
                     return@webSocket
                 }
@@ -424,6 +444,16 @@ class WebPlayer(
     private fun authorised(call: ApplicationCall): Boolean {
         val given = call.request.cookies["noctorium_key"] ?: call.request.headers["X-Noctorium-Key"] ?: call.request.queryParameters["key"]
         return given != null && constantTimeEquals(given, key)
+    }
+
+    /**
+     * Whether a request that changes something came from the page this program served, where the browser says: a
+     * cookie alone could be sent along by another site's page.
+     */
+    private fun fromThisPage(call: ApplicationCall): Boolean {
+        val origin = call.request.headers[HttpHeaders.Origin] ?: return true
+        val host = call.request.headers[HttpHeaders.Host] ?: return true
+        return origin.endsWith("//$host")
     }
 
     private fun constantTimeEquals(a: String, b: String): Boolean {

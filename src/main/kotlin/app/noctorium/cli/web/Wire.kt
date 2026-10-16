@@ -6,6 +6,7 @@ import app.noctorium.cli.DesktopSignIn
 import app.noctorium.cli.cliVersion
 import app.noctorium.cli.tui.Settings
 import app.noctorium.core.AppState
+import app.noctorium.core.LinkState
 import app.noctorium.domain.Album
 import app.noctorium.domain.Artist
 import app.noctorium.domain.Playlist
@@ -25,6 +26,7 @@ import app.noctorium.settings.ProgressBarStyle
 import app.noctorium.settings.QueueColumn
 import app.noctorium.settings.ScrobbleServiceState
 import app.noctorium.settings.ServiceBadgeStyle
+import app.noctorium.settings.SpotifyDataImportState
 import app.noctorium.settings.ThemePreset
 import app.noctorium.settings.ThemeSkin
 import app.noctorium.settings.VisualiserStyle
@@ -32,6 +34,10 @@ import app.noctorium.settings.Windows98Palette
 import app.noctorium.settings.resolvedAccent
 import app.noctorium.settings.themeColours
 import app.noctorium.settings.windows98Palette
+import app.noctorium.spotify.SPOTIFY_DATA_EXPORT_HOW
+import app.noctorium.spotify.SPOTIFY_DATA_EXPORT_LIMITS
+import app.noctorium.spotify.SPOTIFY_PUBLIC_PLAYLIST_LIMITS
+import app.noctorium.spotify.SpotifyPublicPlaylistState
 import app.noctorium.tidal.TidalApplication
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -301,7 +307,95 @@ data class WSpotify(
     val devices: List<WSpotifyDevice>,
     /** The device chosen, by Spotify's id; blank for whichever Spotify has active. */
     val device: String,
+    /**
+     * The public playlists the library follows without a sign-in, in the order they were added, each as it was last
+     * read; and, while one is being read before it is added, [addingPublicPlaylist]. [publicMessage] is what the last
+     * addition or removal said, apart from [message], which is the sign-in's.
+     */
+    val publicPlaylists: List<WSpotifyPublicPlaylist> = emptyList(),
+    val addingPublicPlaylist: Boolean = false,
+    val publicMessage: String? = null,
+    /** The import of Spotify's data download, while it runs and once it has. */
+    val dataImport: WSpotifyImport = WSpotifyImport(),
+    /**
+     * Core's own words, which every player shows as they are: what following public playlists can and cannot do,
+     * over the box that takes their links; how to get Spotify's data download; and what its import leaves out.
+     */
+    val publicLimits: String = SPOTIFY_PUBLIC_PLAYLIST_LIMITS,
+    val dataExportHow: String = SPOTIFY_DATA_EXPORT_HOW,
+    val dataExportLimits: String = SPOTIFY_DATA_EXPORT_LIMITS,
+    /** The largest file the import's upload takes, in bytes, so the page can say so before sending a larger one. */
+    val importLimitBytes: Long = WebCommands.SPOTIFY_IMPORT_MOST_BYTES,
 )
+
+/**
+ * One public Spotify playlist the library follows without a sign-in, as Settings lists it: [title] is blank until it
+ * has been read once, and [lastError] says why the last read did not work, when it did not -- the copy before it is
+ * still the one in the library. [mayBeLonger] is a page that showed its most, the first hundred songs.
+ */
+@Serializable
+data class WSpotifyPublicPlaylist(
+    val id: String,
+    val title: String,
+    val owner: String,
+    val songCount: Int? = null,
+    val mayBeLonger: Boolean = false,
+    val lastError: String? = null,
+    val artworkUrl: String? = null,
+    /** Its address on Spotify. */
+    val url: String,
+)
+
+fun SpotifyPublicPlaylistState.wire() = WSpotifyPublicPlaylist(id, title, owner, songCount, mayBeLonger, lastError, artworkUrl, url)
+
+/** What the last import of Spotify's data download made: how many playlists and songs, and the words for it all. */
+@Serializable
+data class WSpotifyImportSummary(
+    val playlists: Int,
+    val songs: Int,
+    val likedSongs: Int,
+    val replaced: Int,
+    val emptyPlaylists: Int,
+    val savedAlbums: Int,
+    val message: String,
+)
+
+/**
+ * The import of Spotify's data download: whether one is under way and how far it has got, and what came of the last
+ * one -- [message], which says it did not happen when [failed], and the last that worked in [summary].
+ */
+@Serializable
+data class WSpotifyImport(
+    val importing: Boolean = false,
+    val progress: String? = null,
+    val message: String? = null,
+    val failed: Boolean = false,
+    val summary: WSpotifyImportSummary? = null,
+)
+
+fun SpotifyDataImportState.wire() = WSpotifyImport(
+    importing, progress, message, failed,
+    summary?.let { WSpotifyImportSummary(it.playlists, it.songs, it.likedSongs, it.replaced, it.emptyPlaylists, it.savedAlbums, it.message) },
+)
+
+/**
+ * The link pasted last, and what came of it, by LinkStatus's name in lower case: [canKeepInLibrary] while it is a
+ * public Spotify playlist, read from its public page, that the library does not follow yet. The page then offers
+ * Keep in library, which is spotifyPublicAdd with [url], and this goes back to false once it is kept.
+ */
+@Serializable
+data class WLink(
+    val status: String,
+    val url: String? = null,
+    val provider: ProviderType? = null,
+    /** LinkKind's name in lower case: track, playlist, or short for a share link not followed yet. */
+    val kind: String? = null,
+    val message: String? = null,
+    val trackCount: Int = 0,
+    val canKeepInLibrary: Boolean = false,
+)
+
+fun LinkState.wire() = WLink(status.name.lowercase(), link?.url, link?.provider, link?.kind?.name?.lowercase(), message, tracks.size, canKeepInLibrary)
 
 /** VK, signed in with a browser's session, and what to read before signing in. */
 @Serializable
@@ -698,6 +792,10 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
                     playsOnSpotify = s.spotify.playsOnSpotify,
                     devices = s.spotify.devices.map { WSpotifyDevice(it.id, it.name, it.type, it.isActive, it.isRestricted, it.volumePercent) },
                     device = s.spotify.device,
+                    publicPlaylists = s.spotify.publicPlaylists.map { it.wire() },
+                    addingPublicPlaylist = s.spotify.addingPublicPlaylist,
+                    publicMessage = s.spotify.publicMessage,
+                    dataImport = s.spotify.dataImport.wire(),
                 ),
                 vk = WVk(
                     connected = s.vk.connected,
@@ -829,6 +927,9 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
         )
     }
 
+    /** The link pasted last, from this page or another, or in the terminal's search box. */
+    fun link(): JsonElement = wireJson.encodeToJsonElement(state.linkState.value.wire())
+
     /** Every part, for a page that has just connected. */
     fun all(): Map<String, () -> JsonElement> = linkedMapOf(
         "settings" to ::settings,
@@ -843,6 +944,7 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
         "connect" to ::connect,
         "signIn" to ::signIn,
         "account" to ::account,
+        "link" to ::link,
     )
 }
 

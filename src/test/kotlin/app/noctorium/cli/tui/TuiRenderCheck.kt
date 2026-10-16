@@ -734,6 +734,135 @@ class TuiRenderCheck {
     }
 
     /**
+     * Spotify with nobody signed in, in Settings under the sign-ins: the warning over the box for a public playlist's
+     * link, the playlists followed -- one read, one cut at its hundred songs, one not read yet, and one gone private
+     * since -- and the import of Spotify's data download, done and failed; the prompts, the menu and the question
+     * they open; Keep in library over a pasted link on Search; and the search finding both. Core's own services, with
+     * nothing read at launch and no sign-in anywhere: the private one is found missing by core's own Spotify without
+     * Spotify being asked, its id being none Spotify could have, and every other playlist is a made-up copy.
+     */
+    @Test
+    fun `Spotify without a sign-in draws`() {
+        val folder = folder ?: return
+        folder.mkdirs()
+        val parts = CliParts()
+        val stand = app.noctorium.cli.SpotifyPublicStandIn
+        val home = Files.createTempDirectory("noctorium-spotify-render")
+        val state = app.noctorium.cli.BandcampStandIn.state(
+            parts,
+            preferences = NoctoriumPreferences(spotifyPublicPlaylists = listOf(stand.NIGHT_BUS, stand.RAINY_DAYS, stand.NOT_READ, stand.GONE)),
+            system = app.noctorium.cli.RecordingBridge(),
+            credentials = app.noctorium.settings.InMemorySecretStore(),
+            spotifyCopies = stand.copies(),
+            playlists = app.noctorium.playlists.LocalPlaylistRepository(home.resolve("playlists.json")),
+            ownServices = true,
+        )
+        val tui = Tui(state, parts, web = null).also { it.page = Page.SETTINGS }
+        val themes = listOf(
+            ThemePreset.NOCTORIUM_NIGHT to "night",
+            ThemePreset.CATPPUCCIN_LATTE to "latte",
+            ThemePreset.WINDOWS_98 to "98",
+            ThemePreset.WINDOWS_XP to "xp",
+        )
+        fun theme(theme: ThemePreset) {
+            state.setTheme(theme)
+            waitFor(5_000) { state.settings.value.preferences.theme == theme }
+        }
+        try {
+            waitFor(5_000) { state.settings.value.spotify.publicPlaylists.size == 4 }
+            // Opened, the private one is found missing, and shown as it was last read.
+            state.openPlaylist(app.noctorium.domain.Playlist(stand.GONE, "Saturday Morning", app.noctorium.domain.ProviderType.SPOTIFY))
+            waitFor(5_000) { state.settings.value.spotify.publicPlaylists.any { it.lastError != null } }
+            state.closePlaylist()
+            // What adding one already followed says, under the box.
+            state.addSpotifyPublicPlaylist(stand.link(stand.NIGHT_BUS))
+            waitFor(5_000) { state.settings.value.spotify.publicMessage != null }
+            for ((preset, name) in themes) {
+                theme(preset)
+                SettingsIndex.jump(tui, "spotifyPremium")
+                write(folder, "spotify-public-$name", tui)
+            }
+            theme(ThemePreset.NOCTORIUM_NIGHT)
+            write(folder, "spotify-public-night-narrow", tui, 84, 30)
+            SettingsIndex.jump(tui, "spotifyImport")
+            write(folder, "spotify-import-night", tui)
+
+            // The prompts, the menu and the question.
+            SettingsIndex.jump(tui, "spotifyPublic")
+            tui.press(Input.Key(Keys.ENTER))
+            write(folder, "spotify-public-prompt", tui)
+            tui.overlays.clear()
+            val all = Settings.rows(tui)
+            tui.list(Page.SETTINGS.name).selected = all.indexOfFirst { it is Row.Action && it.label == "Saturday Morning" }
+            write(folder, "spotify-public-gone-chosen", tui)
+            tui.press(Input.Key(Keys.ENTER))
+            write(folder, "spotify-public-menu", tui)
+            tui.overlays.clear()
+            tui.press(Input.Key(Keys.DELETE))
+            write(folder, "spotify-public-remove", tui)
+            tui.overlays.clear()
+            SettingsIndex.jump(tui, "spotifyImport")
+            tui.press(Input.Key(Keys.ENTER))
+            write(folder, "spotify-import-prompt", tui)
+            tui.overlays.clear()
+
+            // An import done, and one of a file that is not the download.
+            val file = home.resolve("my_spotify_data.zip")
+            Files.write(file, stand.download())
+            state.importSpotifyData(file)
+            waitFor(10_000) { state.settings.value.spotify.dataImport.summary != null }
+            for ((preset, name) in themes) {
+                theme(preset)
+                SettingsIndex.jump(tui, "spotifyImport")
+                write(folder, "spotify-imported-$name", tui)
+            }
+            theme(ThemePreset.NOCTORIUM_NIGHT)
+            val wrong = home.resolve("Userdata.json")
+            Files.writeString(wrong, """{"username":"made-up-listener"}""")
+            state.importSpotifyData(wrong)
+            waitFor(10_000) { state.settings.value.spotify.dataImport.failed }
+            SettingsIndex.jump(tui, "spotifyImport")
+            write(folder, "spotify-import-failed-night", tui)
+            tui.page = Page.LIBRARY
+            write(folder, "spotify-imported-library", tui)
+
+            // The search finding them.
+            tui.page = Page.SETTINGS
+            tui.settingsQuery = "without premium"
+            tui.settingsSearchFocused = true
+            write(folder, "spotify-search-without-premium", tui)
+            tui.settingsQuery = "my_spotify_data"
+            write(folder, "spotify-search-my-spotify-data", tui)
+            SettingsIndex.close(tui)
+
+            // Keep in library over a pasted link, which only Spotify's own page could make, so made up here.
+            val url = "https://open.spotify.com/playlist/0MadeUpSundayDrive0004"
+            tui.pastedLink = {
+                app.noctorium.core.LinkState(
+                    app.noctorium.core.LinkStatus.DONE,
+                    app.noctorium.domain.MusicLink(app.noctorium.domain.ProviderType.SPOTIFY, app.noctorium.domain.LinkKind.PLAYLIST, "0MadeUpSundayDrive0004", url),
+                    tracks = stand.rainyDays.tracks,
+                    message = "Playing 100 tracks from Spotify. Spotify's public page shows only a playlist's first 100 songs.",
+                    canKeepInLibrary = true,
+                )
+            }
+            tui.searchText = url
+            tui.searchFocused = false
+            tui.page = Page.SEARCH
+            for ((preset, name) in themes) {
+                theme(preset)
+                write(folder, "spotify-keep-$name", tui)
+            }
+            theme(ThemePreset.NOCTORIUM_NIGHT)
+            write(folder, "spotify-keep-night-narrow", tui, 84, 30)
+        } finally {
+            state.setTheme(ThemePreset.NOCTORIUM_NIGHT)
+            state.close()
+            home.toFile().deleteRecursively()
+        }
+    }
+
+    /**
      * The visualiser drawn from a real mpv measuring real sound, with nothing to hear: mpv plays to its null output
      * a sweep from the bass up over pink noise, made by ffmpeg, and the Playlist layout is drawn as it plays. Needs
      * `-Dnoctorium.live=true` as well, ffmpeg on the path, and mpv where `-Dnoctorium.mpv` says or on the path.
