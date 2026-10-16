@@ -11,13 +11,14 @@ import app.noctorium.domain.Artist
 import app.noctorium.domain.Playlist
 import app.noctorium.domain.ProviderType
 import app.noctorium.domain.Track
+import app.noctorium.domain.betaWarning
 import app.noctorium.domain.editableOnService
 import app.noctorium.playback.AudioAnalysisKind
 import app.noctorium.playback.SleepTimerState
 import app.noctorium.playback.VolumeBoost
 import app.noctorium.playlists.LocalPlaylist
 import app.noctorium.settings.AutoplaySource
-import app.noctorium.settings.DEFAULT_HYBRID_SEARCH
+import app.noctorium.settings.HYBRID_SEARCH_SERVICES
 import app.noctorium.settings.HomePlay
 import app.noctorium.settings.IconSet
 import app.noctorium.settings.ProgressBarStyle
@@ -31,6 +32,7 @@ import app.noctorium.settings.Windows98Palette
 import app.noctorium.settings.resolvedAccent
 import app.noctorium.settings.themeColours
 import app.noctorium.settings.windows98Palette
+import app.noctorium.tidal.TidalApplication
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -312,6 +314,58 @@ data class WVk(
     val notice: List<String>,
 )
 
+/**
+ * Apple Music, signed in with the token Apple's web player keeps in its media-user-token cookie: pasted here, since
+ * a browser page cannot reach another site's cookies any more than a terminal can show Apple's sign-in.
+ */
+@Serializable
+data class WAppleMusic(
+    val connected: Boolean,
+    val checking: Boolean,
+    /** The storefront the catalogue is read in, "us" or "gb": the account's once signed in, the computer's before. */
+    val storefront: String,
+    /** A MusicKit developer token of the listener's own is in use, rather than the one Apple's web player is served. */
+    val ownDeveloperToken: Boolean,
+    val message: String? = null,
+    /** Where the cookie is, and what signing in adds: the terminal player says the same. */
+    val how: List<String>,
+)
+
+/** Deezer: a public profile rather than a sign-in, whose playlists, loved tracks and albums the library shows. */
+@Serializable
+data class WDeezer(
+    /** The profile's number, deezer.com/profile/<number>; blank for none. */
+    val profileId: String,
+    /** Whether a profile is kept, which Deezer confirmed when it was given. */
+    val found: Boolean,
+    /** The profile's own name, as Deezer gave it. */
+    val name: String,
+    val checking: Boolean,
+    val message: String? = null,
+)
+
+/**
+ * Tidal: its own sign-in page, through a Tidal app of the listener's own until Noctorium has one, which answers to
+ * [redirectUri] on the computer running Noctorium -- so the browser that signs in has to be on that computer.
+ */
+@Serializable
+data class WTidal(
+    /** A Tidal app is in force, so signing in is possible. */
+    val configured: Boolean,
+    /** It is the listener's own, from developer.tidal.com. */
+    val ownApp: Boolean,
+    /** Tidal's catalogue can be read: somebody is signed in, or the app's secret is known. */
+    val readsCatalogue: Boolean,
+    val connected: Boolean,
+    val connecting: Boolean,
+    val account: String,
+    /** The address to register among the app's redirect URIs, exactly as written. */
+    val redirectUri: String,
+    /** Where a Tidal app is registered. */
+    val developerPortal: String,
+    val message: String? = null,
+)
+
 @Serializable
 data class WTheme(
     val name: String,
@@ -390,6 +444,14 @@ data class WSettings(
     val spotify: WSpotify,
     val bandcamp: WBandcamp,
     val vk: WVk,
+    val appleMusic: WAppleMusic,
+    val deezer: WDeezer,
+    val tidal: WTidal,
+    /**
+     * What goes above the sign-in or setup of each service in beta, by ProviderType's name -- core's one warning, for
+     * Spotify, Bandcamp, VK, Apple Music, Deezer and Tidal -- and nothing for YouTube Music, YouTube or SoundCloud.
+     */
+    val betaWarnings: Map<String, String> = emptyMap(),
     /** How fast it plays, 1 being as recorded, from 0.5 to 2. */
     val playbackSpeed: Float,
     /** The queue running out carries on with songs like the last. */
@@ -644,14 +706,41 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
                     message = s.vk.message,
                     notice = Settings.VK_NOTICE + Settings.VK_COOKIES_HOW,
                 ),
+                appleMusic = WAppleMusic(
+                    connected = s.appleMusic.connected,
+                    checking = s.appleMusic.checking,
+                    storefront = s.appleMusic.storefront,
+                    ownDeveloperToken = s.appleMusic.ownDeveloperToken,
+                    message = s.appleMusic.message,
+                    how = Settings.APPLE_MUSIC_HOW,
+                ),
+                deezer = WDeezer(
+                    profileId = s.deezer.profileId,
+                    found = s.deezer.found,
+                    name = s.deezer.name,
+                    checking = s.deezer.checking,
+                    message = s.deezer.message,
+                ),
+                tidal = WTidal(
+                    configured = s.tidal.configured,
+                    ownApp = s.tidal.ownApp,
+                    readsCatalogue = s.tidal.readsCatalogue,
+                    connected = s.tidal.connected,
+                    connecting = s.tidal.connecting,
+                    account = s.tidal.accountName,
+                    redirectUri = s.tidal.redirectUri,
+                    developerPortal = TidalApplication.DEVELOPER_PORTAL,
+                    message = s.tidal.message,
+                ),
+                betaWarnings = ProviderType.entries.mapNotNull { provider -> provider.betaWarning?.let { provider.name to it } }.toMap(),
                 playbackSpeed = p.playbackSpeed,
                 autoplay = p.autoplay,
                 autoplayFrom = p.autoplayFrom.name,
                 autoplaySources = AutoplaySource.entries.map { WChoice(it.name, it.displayName, it.description) },
                 avoidRecent = p.autoplayAvoidRecent,
                 keepQueue = p.keepQueue,
-                hybridSearch = DEFAULT_HYBRID_SEARCH.filter { it in p.hybridSearch }.map { it.name },
-                hybridServices = DEFAULT_HYBRID_SEARCH.map { it.name },
+                hybridSearch = HYBRID_SEARCH_SERVICES.filter { it in p.hybridSearch }.map { it.name },
+                hybridServices = HYBRID_SEARCH_SERVICES.map { it.name },
                 sleepFade = p.sleepFadeSeconds,
                 visualiser = p.visualiser.name,
                 visualiserStyles = VisualiserStyle.entries.map { WChoice(it.name, it.displayName, it.description) },
@@ -764,5 +853,8 @@ fun likeKeyOf(provider: ProviderType, id: String) = when (provider) {
     ProviderType.SPOTIFY -> "spotify:$id"
     ProviderType.BANDCAMP -> "bc:$id"
     ProviderType.VK -> "vk:$id"
+    ProviderType.APPLE_MUSIC -> "am:$id"
+    ProviderType.DEEZER -> "dz:$id"
+    ProviderType.TIDAL -> "td:$id"
     ProviderType.LOCAL -> "local:$id"
 }

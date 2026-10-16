@@ -47,6 +47,16 @@ class TerminalBridge(
     @Volatile
     var notices: (Notice) -> Unit = {}
 
+    companion object {
+        /**
+         * Whether this terminal is reached over ssh, by what ssh sets in the session it starts: then the browser the
+         * listener is looking at is on another machine, and a sign-in whose answer comes back to 127.0.0.1 -- Tidal's,
+         * Spotify's -- cannot finish in it.
+         */
+        fun overSsh(environment: (String) -> String? = System::getenv): Boolean =
+            listOf("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY").any { !environment(it).isNullOrBlank() }
+    }
+
     /** Writes raw bytes to the terminal, for OSC 52. Set by whichever front end owns the terminal. */
     @Volatile
     var terminalOutput: ((String) -> Unit)? = null

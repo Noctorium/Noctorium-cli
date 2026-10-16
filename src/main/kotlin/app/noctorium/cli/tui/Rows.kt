@@ -5,10 +5,11 @@ import app.noctorium.core.AppState
 import app.noctorium.domain.Playlist
 import app.noctorium.domain.PlaybackOrigin
 import app.noctorium.domain.ProviderType
+import app.noctorium.domain.ServiceMarks
 import app.noctorium.domain.Track
+import app.noctorium.domain.isAlbumPage
+import app.noctorium.domain.isArtistPage
 import app.noctorium.playlists.LocalPlaylist
-import app.noctorium.spotify.isSpotifyAlbum
-import app.noctorium.spotify.isSpotifyArtist
 
 /** One line of a list page. Headers and notes are drawn but skipped over by the selection. */
 sealed interface Row {
@@ -110,7 +111,10 @@ class ListState {
     }
 }
 
-/** The two letters a row shows for where a track came from. */
+/**
+ * The two letters a row shows for where a track came from. Apple Music's, Deezer's and Tidal's are core's own
+ * ([ServiceMarks.letters]), as every player writes them; the older ones are this terminal's as they have always been.
+ */
 fun ProviderType.badge(): String = when (this) {
     ProviderType.YOUTUBE_MUSIC -> "YT"
     ProviderType.YOUTUBE_VIDEO -> "YV"
@@ -118,31 +122,47 @@ fun ProviderType.badge(): String = when (this) {
     ProviderType.SPOTIFY -> "SP"
     ProviderType.BANDCAMP -> "BC"
     ProviderType.VK -> "VK"
+    ProviderType.APPLE_MUSIC, ProviderType.DEEZER, ProviderType.TIDAL -> ServiceMarks.letters(this)
     ProviderType.LOCAL -> "··"
 }
 
 /**
  * Whether a like given to a track from here goes to the listener's account: YouTube's, SoundCloud's,
  * Spotify's Liked Songs and VK's My music do. Bandcamp has none, and a file on this computer is nobody's.
+ * Noctorium does not like songs on Apple Music, Deezer or Tidal yet: one of theirs, once it plays, is the
+ * recording it was matched to, and that one's heart works as any other does.
  */
 val ProviderType.keepsLikes: Boolean
-    get() = this != ProviderType.BANDCAMP && this != ProviderType.LOCAL
+    get() = when (this) {
+        ProviderType.YOUTUBE_MUSIC, ProviderType.YOUTUBE_VIDEO, ProviderType.SOUNDCLOUD, ProviderType.SPOTIFY, ProviderType.VK -> true
+        ProviderType.BANDCAMP, ProviderType.APPLE_MUSIC, ProviderType.DEEZER, ProviderType.TIDAL, ProviderType.LOCAL -> false
+    }
 
 /**
  * What a playlist a service listed really is: a whole artist, an album, or a list.
  *
- * Bandcamp and Spotify answer a search with their albums and artists as playlists -- which is what lets one
- * open like any other list -- and say which by the start of the id.
+ * Bandcamp, Spotify, Apple Music, Deezer and Tidal answer a search with their albums and artists as playlists --
+ * which is what lets one open like any other list -- and say which by the start of the id, as core reads it for
+ * every player ([isArtistPage], [isAlbumPage]). A Bandcamp track sold on its own opens as the album of one it is.
  */
 enum class ListKind { ARTIST, ALBUM, PLAYLIST }
 
 val Playlist.kind: ListKind
     get() = when {
-        BandcampMusicProvider.isArtist(this) -> ListKind.ARTIST
-        isSpotifyArtist() -> ListKind.ARTIST
-        provider == ProviderType.BANDCAMP && (id.startsWith("${BandcampMusicProvider.ALBUM}:") || id.startsWith("${BandcampMusicProvider.TRACK}:")) -> ListKind.ALBUM
-        isSpotifyAlbum() -> ListKind.ALBUM
+        isArtistPage() -> ListKind.ARTIST
+        isAlbumPage() -> ListKind.ALBUM
+        provider == ProviderType.BANDCAMP && id.startsWith("${BandcampMusicProvider.TRACK}:") -> ListKind.ALBUM
         else -> ListKind.PLAYLIST
+    }
+
+/**
+ * Whether this service's search answers with its albums and artists as playlists to open, and with the same again
+ * as bare names, which are left out for it: a name can only be searched for again, and the playlist opens it.
+ */
+val ProviderType.opensReleases: Boolean
+    get() = when (this) {
+        ProviderType.BANDCAMP, ProviderType.SPOTIFY, ProviderType.APPLE_MUSIC, ProviderType.DEEZER, ProviderType.TIDAL -> true
+        ProviderType.YOUTUBE_MUSIC, ProviderType.YOUTUBE_VIDEO, ProviderType.SOUNDCLOUD, ProviderType.VK, ProviderType.LOCAL -> false
     }
 
 fun Palette.badgeColour(provider: ProviderType): Rgb = when (provider) {
@@ -151,6 +171,9 @@ fun Palette.badgeColour(provider: ProviderType): Rgb = when (provider) {
     ProviderType.SPOTIFY -> spotify
     ProviderType.BANDCAMP -> bandcamp
     ProviderType.VK -> vk
+    ProviderType.APPLE_MUSIC -> appleMusic
+    ProviderType.DEEZER -> deezer
+    ProviderType.TIDAL -> tidal
     ProviderType.LOCAL -> subtext
 }
 

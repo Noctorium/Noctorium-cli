@@ -13,6 +13,7 @@ import app.noctorium.core.SearchMode
 import app.noctorium.domain.Playlist
 import app.noctorium.domain.ProviderType
 import app.noctorium.domain.SearchResults
+import app.noctorium.domain.betaWarning
 import app.noctorium.domain.pageUrl
 import app.noctorium.playback.MpvPlaybackEngine
 import app.noctorium.playback.PlaybackTool
@@ -24,6 +25,7 @@ import app.noctorium.settings.NoctoriumPreferences
 import app.noctorium.settings.ScrobbleConnectionStatus
 import app.noctorium.settings.SettingsRepository
 import app.noctorium.settings.SpotifyPlayback
+import app.noctorium.tidal.TidalApplication
 import app.noctorium.update.Version
 import app.noctorium.vk.VkCookies
 import kotlinx.coroutines.CoroutineScope
@@ -45,7 +47,8 @@ import java.nio.file.Path
  */
 object Commands {
     private val usage = """
-        |Noctorium $cliVersion — YouTube Music, SoundCloud, Bandcamp, Spotify and VK, in a terminal and a browser.
+        |Noctorium $cliVersion — YouTube Music, SoundCloud, Bandcamp, Spotify, VK, Apple Music, Deezer and Tidal,
+        |in a terminal and a browser.
         |
         |  noctorium                     the player, in this terminal
         |  noctorium play <words|link>   the player, already playing the first match
@@ -65,7 +68,15 @@ object Commands {
         |      --premium                   Premium: its songs play in your Spotify app
         |  noctorium login vk            VK, through a signed-in browser's session; says what that means
         |      --cookies <text|file>       "p=…; remixsid=…", or a cookies.txt holding them
-        |  noctorium logout <youtube|soundcloud|bandcamp|spotify|vk|lastfm|librefm|listenbrainz>
+        |  noctorium login deezer <profile>
+        |                                a public Deezer profile, by its link or number; no password
+        |  noctorium login tidal         Tidal's own sign-in, in a browser on this computer, through
+        |      --client-id <id>            a Tidal app of your own, from developer.tidal.com
+        |      --secret <secret>           its secret too, to search Tidal without signing in
+        |  noctorium login applemusic    Apple Music, with a signed-in browser's media-user-token
+        |      --token <text|file>         the cookie, or a Cookie: line with it in
+        |  noctorium logout <service>    youtube, soundcloud, bandcamp, spotify, vk, applemusic, deezer,
+        |                                tidal, lastfm, librefm or listenbrainz
         |  noctorium spotify devices     where your Spotify is open, to play its songs there (Premium)
         |  noctorium spotify device <name|any>
         |                                which of them plays Spotify songs
@@ -188,8 +199,8 @@ object Commands {
                     println("      ${out.dim(track.pageUrl)}")
                 }
             }
-            // Bandcamp's and Spotify's albums and artists come as playlists, which is how they open; each is listed
-            // as what it is.
+            // Bandcamp's, Spotify's, Apple Music's, Deezer's and Tidal's albums and artists come as playlists, which is
+            // how they open; each is listed as what it is.
             val byKind = results.playlists.groupBy { it.kind }
             val playlists = byKind[ListKind.PLAYLIST].orEmpty()
             val albums = byKind[ListKind.ALBUM].orEmpty()
@@ -284,12 +295,17 @@ object Commands {
         if (service == "bandcamp" || service == "bc") return bandcamp(words.drop(1).joinToString(" "), fromDesktop = "--from-desktop" in options)
         if (service == "spotify" || service == "sp") return spotifyLogin(premium = "--premium" in options)
         if (service == "vk") return vkLogin(options.indexOf("--cookies").takeIf { it >= 0 }?.let { options.getOrNull(it + 1) })
+        fun option(name: String) = options.indexOf(name).takeIf { it >= 0 }?.let { options.getOrNull(it + 1) }
+        if (service == "deezer" || service == "dz") return deezerLogin(words.drop(1).joinToString(" "))
+        if (service == "tidal" || service == "td") return tidalLogin(option("--client-id"), option("--secret"))
+        if (service in APPLE_MUSIC_NAMES) return appleMusicLogin(option("--token"))
         val youTube = when (service) {
             "youtube", "yt", "youtube-music", "ytm" -> true
             "soundcloud", "sc" -> false
             else -> {
                 System.err.println(
-                    "Sign in to youtube, soundcloud, spotify or vk, or name your Bandcamp collection: noctorium login bandcamp <name>. " +
+                    "Sign in to youtube, soundcloud, spotify, vk, tidal or applemusic, or name your Bandcamp collection or " +
+                        "Deezer profile: noctorium login bandcamp <name>, noctorium login deezer <profile>. " +
                         "Last.fm, Libre.fm and ListenBrainz are under Settings in the player.",
                 )
                 return 2
@@ -353,9 +369,10 @@ object Commands {
             )
             return 2
         }
+        val out = Out()
+        betaWarning(ProviderType.BANDCAMP, out)
         val parts = parts()
         val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
-        val out = Out()
         try {
             state.setBandcampUsername(name)
             // Checking is set before the call returns, and cleared with the answer.
@@ -386,9 +403,10 @@ object Commands {
      * on YouTube Music; `--premium` asks as well to play them in the account's own Spotify app.
      */
     private fun spotifyLogin(premium: Boolean): Int {
+        val out = Out()
+        betaWarning(ProviderType.SPOTIFY, out)
         val parts = parts()
         val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
-        val out = Out()
         parts.bridge.notices = { notice ->
             if (notice is TerminalBridge.Notice.OpenLink) {
                 println(if (notice.opened) "  Spotify's sign-in is open in your browser. If nothing appeared: ${notice.url}" else "  Open this in a browser on this computer: ${notice.url}")
@@ -425,12 +443,12 @@ object Commands {
      */
     private fun vkLogin(cookies: String?): Int {
         val out = Out()
-        println()
+        betaWarning(ProviderType.VK, out)
         (Settings.VK_NOTICE + Settings.VK_COOKIES_HOW).forEach { paragraph ->
             wrapWords(paragraph, 96).forEach { println("  $it") }
             println()
         }
-        val text = cookies?.let(::vkCookieText) ?: ask("  Paste them, as p=…; remixsid=…: ")
+        val text = cookies?.let(::cookieText) ?: ask("  Paste them, as p=…; remixsid=…: ")
         if (text.isNullOrBlank()) {
             System.err.println("No cookies were given, so nothing changed.")
             return 2
@@ -457,11 +475,151 @@ object Commands {
     }
 
     /**
-     * What `--cookies` gave for VK: the cookies as text, or a file holding them -- a cookies.txt exported from a
-     * browser, whose lines become `name=value` for core to read. Those marked #HttpOnly_ are cookies too, and
+     * `noctorium login deezer <profile>`: the public Deezer profile whose playlists, loved tracks and albums the
+     * library shows, by its link, a share link, or the number at the end of it.
+     *
+     * Not a sign-in, as Bandcamp's collection is not one: Deezer shows a public profile to anybody, and lets no new
+     * application sign anybody in. Core checks the profile with Deezer before keeping it, and this waits for that.
+     */
+    private fun deezerLogin(given: String): Int {
+        if (given.isBlank()) {
+            System.err.println("Whose profile: noctorium login deezer <profile>, with your Deezer profile's link or the number at the end of it.")
+            return 2
+        }
+        val out = Out()
+        betaWarning(ProviderType.DEEZER, out)
+        val parts = parts()
+        val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
+        try {
+            state.setDeezerProfile(given.trim())
+            // Checking is set before the call returns, and cleared with Deezer's answer, which always says something.
+            runBlocking { withTimeoutOrNull(30_000) { state.settings.first { !it.deezer.checking && it.deezer.message != null } } }
+            val deezer = state.settings.value.deezer
+            if (deezer.checking) {
+                println("  ${out.warn("!")} Deezer did not answer in time. Try again in a moment.")
+                return 1
+            }
+            val shown = deezer.message?.startsWith(Settings.DEEZER_SHOWN) == true
+            if (shown) {
+                val kept = state.settings.value.preferences.deezerProfileId
+                saved { it.deezerProfileId == kept }
+            }
+            println("  ${if (shown) out.good("✓") else out.warn("!")} ${deezer.message}")
+            return if (shown) 0 else 1
+        } finally {
+            state.close()
+        }
+    }
+
+    /**
+     * `noctorium login tidal`: Tidal's own sign-in page, in the browser on this computer, through a Tidal app of the
+     * listener's own -- its client id given once with `--client-id`, and its secret with `--secret` for the catalogue
+     * to be searched signed out, both kept in the credential store after that. Noctorium has no Tidal app of its own
+     * yet (see TidalApplication).
+     *
+     * Tidal sends its answer to 127.0.0.1 on this computer, as Spotify does, so the browser has to be on this one --
+     * not on a machine this terminal is reached from over ssh, which is said before anything opens.
+     */
+    private fun tidalLogin(clientId: String?, secret: String?): Int {
+        val out = Out()
+        betaWarning(ProviderType.TIDAL, out)
+        val parts = parts()
+        val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
+        parts.bridge.notices = { notice ->
+            if (notice is TerminalBridge.Notice.OpenLink) {
+                println(if (notice.opened) "  Tidal's sign-in is open in your browser. If nothing appeared: ${notice.url}" else "  Open this in a browser on this computer: ${notice.url}")
+            }
+        }
+        try {
+            if (clientId != null) {
+                val before = state.settings.value.tidal.message
+                state.configureTidalApplication(clientId, secret.orEmpty())
+                runBlocking { withTimeoutOrNull(15_000) { state.settings.first { it.tidal.message != null && it.tidal.message != before } } }
+            } else {
+                // Which app is kept is read from the credential store in the background as AppState opens.
+                runBlocking { withTimeoutOrNull(4_000) { state.settings.first { it.tidal.configured } } }
+            }
+            val tidal = state.settings.value.tidal
+            if (!tidal.configured) {
+                println("  ${out.warn("!")} ${tidal.message ?: "Tidal needs an app to sign in through, and Noctorium has none of its own yet."}")
+                println("    Register a free one at ${TidalApplication.DEVELOPER_PORTAL}, with ${tidal.redirectUri} among its redirect URIs, then:")
+                println("    noctorium login tidal --client-id <its client id> --secret <its secret>")
+                return 1
+            }
+            println(out.dim("  Your Tidal app's redirect URIs need ${tidal.redirectUri} among them, exactly as written."))
+            if (TerminalBridge.overSsh()) {
+                Settings.TIDAL_OVER_SSH.forEach { paragraph -> wrapWords(paragraph, 96).forEach { println("  ${out.warn(it)}") } }
+            }
+            val asked = tidal.message
+            state.connectTidal()
+            println(out.dim("  Waiting for Tidal, five minutes at most. The browser has to be on this computer."))
+            // The sign-in begins in the background: first it says it is waiting for the browser, then how it went.
+            runBlocking {
+                withTimeoutOrNull(6 * 60_000L) {
+                    val begun = state.settings.first { it.tidal.connecting || (it.tidal.message != null && it.tidal.message != asked) }
+                    if (begun.tidal.connecting) state.settings.first { !it.tidal.connecting }
+                }
+            }
+            val now = state.settings.value.tidal
+            if (now.connected) saved { it.tidalUserId.isNotBlank() }
+            println("  ${if (now.connected) out.good("✓") else out.warn("!")} ${now.message ?: if (now.connected) "Tidal is connected." else "Tidal did not connect."}")
+            return if (now.connected) 0 else 1
+        } finally {
+            state.close()
+        }
+    }
+
+    /**
+     * `noctorium login applemusic`: Apple Music, with the token Apple's own web player keeps once somebody has signed
+     * in on Apple's page, in its media-user-token cookie.
+     *
+     * A terminal cannot show Apple's page, so the cookie comes from a browser already signed in: typed in when asked,
+     * or with `--token` -- the token, a Cookie: line with it in, or a cookies.txt holding it. Where to find it is said
+     * first. Core checks it with Apple before it keeps it, in the credential store and nowhere else.
+     */
+    private fun appleMusicLogin(token: String?): Int {
+        val out = Out()
+        betaWarning(ProviderType.APPLE_MUSIC, out)
+        Settings.APPLE_MUSIC_HOW.forEach { paragraph ->
+            wrapWords(paragraph, 96).forEach { println("  $it") }
+            println()
+        }
+        val text = token?.let(::cookieText) ?: ask("  Paste it: ")
+        if (text.isNullOrBlank()) {
+            System.err.println("Nothing was given, so nothing changed.")
+            return 2
+        }
+        val parts = parts()
+        val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
+        try {
+            state.completeAppleMusicSignIn(text)
+            // Checking is set before the call returns, and cleared with Apple's answer, which always says something; a
+            // paste that is not the token is said at once, with nothing asked of Apple.
+            runBlocking { withTimeoutOrNull(60_000) { state.settings.first { !it.appleMusic.checking && it.appleMusic.message != null } } }
+            val apple = state.settings.value.appleMusic
+            val signedIn = !apple.checking && apple.message?.startsWith(APPLE_MUSIC_SIGNED_IN) == true
+            if (signedIn) saved { it.appleMusicSignedIn }
+            println("  ${if (signedIn) out.good("✓") else out.warn("!")} ${apple.message ?: "Apple Music did not answer in time."}")
+            return if (signedIn) 0 else 1
+        } finally {
+            state.close()
+        }
+    }
+
+    /** [provider]'s beta warning, where it has one, before its sign-in or setup: every player says it there. */
+    private fun betaWarning(provider: ProviderType, out: Out) {
+        val warning = provider.betaWarning ?: return
+        println()
+        wrapWords(warning, 96).forEach { println("  ${out.warn(it)}") }
+        println()
+    }
+
+    /**
+     * What `--cookies` or `--token` gave: the cookies as text, or a file holding them -- a cookies.txt exported from
+     * a browser, whose lines become `name=value` for core to read. Those marked #HttpOnly_ are cookies too, and VK's
      * remixsid is one.
      */
-    internal fun vkCookieText(given: String): String {
+    internal fun cookieText(given: String): String {
         val file = runCatching { Path.of(given) }.getOrNull()?.takeIf { runCatching { Files.isRegularFile(it) }.getOrDefault(false) }
         val text = file?.let { runCatching { Files.readString(it) }.getOrNull() } ?: given
         val exported = text.lineSequence()
@@ -635,7 +793,7 @@ object Commands {
                     val service = value?.let(::serviceNamed)
                     val on = onOrOff(options.getOrNull(2)?.lowercase())
                     if (service == null || on == null) {
-                        System.err.println("hybrid <youtube-music|youtube-videos|soundcloud|bandcamp|spotify|vk> <on|off>")
+                        System.err.println("hybrid <youtube-music|youtube-videos|soundcloud|bandcamp|spotify|vk|applemusic|deezer|tidal> <on|off>")
                         return 2
                     }
                     state.setHybridSearchService(service, on)
@@ -664,7 +822,7 @@ object Commands {
             line("Sleep timer fade", if (preferences.sleepFadeSeconds <= 0) "off" else "${preferences.sleepFadeSeconds} seconds")
             line(
                 "Hybrid search asks",
-                app.noctorium.settings.DEFAULT_HYBRID_SEARCH.filter { it in preferences.hybridSearch }.joinToString { it.displayName },
+                app.noctorium.settings.HYBRID_SEARCH_SERVICES.filter { it in preferences.hybridSearch }.joinToString { it.displayName },
             )
             return 0
         } finally {
@@ -685,8 +843,17 @@ object Commands {
         "bandcamp", "bc" -> ProviderType.BANDCAMP
         "spotify", "sp" -> ProviderType.SPOTIFY
         "vk" -> ProviderType.VK
+        in APPLE_MUSIC_NAMES -> ProviderType.APPLE_MUSIC
+        "deezer", "dz" -> ProviderType.DEEZER
+        "tidal", "td" -> ProviderType.TIDAL
         else -> null
     }
+
+    /** What Apple Music is called on the command line, with and without its space. */
+    private val APPLE_MUSIC_NAMES = setOf("applemusic", "apple-music", "apple", "am")
+
+    /** Core's first words when an Apple Music sign-in is checked and kept. */
+    private const val APPLE_MUSIC_SIGNED_IN = "Signed in to Apple Music"
 
     /**
      * Waits, five seconds at most, for what AppState saves in the background to reach the settings file. A
@@ -731,7 +898,10 @@ object Commands {
     }
 
     private fun logout(options: List<String>): Int {
-        val service = options.firstOrNull()?.lowercase() ?: run { System.err.println("Sign out of which: youtube, soundcloud, bandcamp, spotify, vk, lastfm, librefm or listenbrainz?"); return 2 }
+        val service = options.firstOrNull()?.lowercase() ?: run {
+            System.err.println("Sign out of which: youtube, soundcloud, bandcamp, spotify, vk, applemusic, deezer, tidal, lastfm, librefm or listenbrainz?")
+            return 2
+        }
         val parts = parts()
         val state = state(parts, MpvPlaybackEngine(parts.backend, downloadedFile = parts.downloads::localFile))
         try {
@@ -751,6 +921,27 @@ object Commands {
                     state.disconnectVk()
                     saved { it.vkAccountName.isBlank() }
                     println("Signed out of VK on this computer. Nothing changed at VK itself.")
+                    return 0
+                }
+                // The token is forgotten here; nothing changes at Apple.
+                in APPLE_MUSIC_NAMES -> {
+                    state.disconnectAppleMusic()
+                    saved { !it.appleMusicSignedIn }
+                    println("Signed out of Apple Music on this computer. Nothing changed at Apple itself.")
+                    return 0
+                }
+                // A public profile, as Bandcamp's collection is: the number is forgotten, and its lists leave the library.
+                "deezer", "dz" -> {
+                    state.setDeezerProfile("")
+                    saved { it.deezerProfileId.isBlank() }
+                    println("Your Deezer profile is out of the library here. Noctorium on your other devices is unchanged.")
+                    return 0
+                }
+                // The sign-in is forgotten; the Tidal app of your own stays, to sign in through again.
+                "tidal", "td" -> {
+                    state.disconnectTidal()
+                    saved { it.tidalUserId.isBlank() }
+                    println("Signed out of Tidal on this computer. Your own Tidal app is still kept, to sign in through again.")
                     return 0
                 }
                 "lastfm", "last.fm" -> state.disconnectLastFm()
@@ -776,6 +967,10 @@ object Commands {
             // through PowerShell and can take longer than the moment above; waited for when one is on record.
             if (state.settings.value.preferences.spotifyAccountName.isNotBlank()) {
                 runBlocking { withTimeoutOrNull(3_000) { state.settings.first { it.spotify.connected } } }
+            }
+            // Tidal's app and sign-in are read from there in the same way.
+            if (state.settings.value.preferences.tidalUserId.isNotBlank()) {
+                runBlocking { withTimeoutOrNull(3_000) { state.settings.first { it.tidal.connected } } }
             }
             val settings = state.settings.value
             println(out.bold("Noctorium CLI $cliVersion"))
@@ -807,6 +1002,35 @@ object Commands {
             // The name is kept exactly as long as the session is, so it says without waiting for VK's own check.
             val vkName = settings.preferences.vkAccountName
             line("VK Music", vkName.isNotBlank(), vkName.ifBlank { "not signed in — noctorium login vk" })
+            // Each of the three is searched, and its links opened, with nothing set up; what is set up adds the library.
+            val apple = settings.appleMusic
+            line(
+                "Apple Music",
+                apple.connected,
+                listOfNotNull(
+                    if (apple.connected) "signed in, in the ${apple.storefront.uppercase()} store" else "not signed in — noctorium login applemusic",
+                    "your own developer token".takeIf { apple.ownDeveloperToken },
+                ).joinToString(" · "),
+            )
+            // A profile's number and name are kept in the settings, and said without asking Deezer again.
+            val profile = settings.preferences.deezerProfileId
+            line(
+                "Deezer",
+                profile.isNotBlank(),
+                if (profile.isBlank()) "no profile — noctorium login deezer <profile>"
+                else listOfNotNull(settings.preferences.deezerProfileName.takeIf(String::isNotBlank), "deezer.com/profile/$profile").joinToString(" · "),
+            )
+            val tidal = settings.tidal
+            line(
+                "Tidal",
+                tidal.connected,
+                when {
+                    tidal.connected -> listOfNotNull(tidal.accountName.takeIf(String::isNotBlank), "through your own Tidal app".takeIf { tidal.ownApp }).joinToString(" · ").ifBlank { "connected" }
+                    tidal.configured -> "not connected — noctorium login tidal"
+                    // Or not read from the credential store yet, which can take a moment longer than this waits.
+                    else -> "not set up — noctorium login tidal says how"
+                },
+            )
             // A sign-in waiting to be allowed says where, whole: over ssh no browser opened, and it is for copying.
             fun scrobbler(service: app.noctorium.settings.ScrobbleServiceState) = when {
                 service.status == ScrobbleConnectionStatus.CONNECTED -> service.username ?: "connected"
@@ -894,6 +1118,10 @@ class Out(private val colour: Boolean = System.console() != null && System.geten
         ProviderType.SPOTIFY -> wrap("1;38;2;30;215;96", "SP")
         ProviderType.BANDCAMP -> wrap("1;38;2;98;154;169", "BC")
         ProviderType.VK -> wrap("1;38;2;0;119;255", "VK")
+        ProviderType.APPLE_MUSIC -> wrap("1;38;2;250;36;60", "AM")
+        ProviderType.DEEZER -> wrap("1;38;2;162;56;255", "DZ")
+        // Tidal's own colour is black, which a dark terminal would swallow: its letters in the terminal's own colour.
+        ProviderType.TIDAL -> wrap("1", "TD")
         ProviderType.LOCAL -> "··"
     }
 }

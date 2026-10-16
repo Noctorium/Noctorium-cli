@@ -620,6 +620,120 @@ class TuiRenderCheck {
     }
 
     /**
+     * Apple Music, Deezer and Tidal in Settings, each under the beta warning, as Spotify, Bandcamp and VK now are:
+     * signed out and signed in, under a dark theme, a light one and the Windows ones, wide and narrow; what Enter opens
+     * on each; Tidal over ssh; the search finding them; and their songs, albums and artists badged in a search of them.
+     * The services are stand-ins, every sign-in is made up and in memory, and the clipboard and the browser are written
+     * down rather than used, so nothing reaches any of the three.
+     */
+    @Test
+    fun `the later services draw`() {
+        val folder = folder ?: return
+        folder.mkdirs()
+        val parts = CliParts()
+        val bridge = app.noctorium.cli.RecordingBridge()
+        val stand = app.noctorium.cli.LaterServicesStandIn
+        fun open(signedIn: Boolean): Pair<app.noctorium.core.AppState, Tui> {
+            val state = app.noctorium.cli.BandcampStandIn.state(
+                parts,
+                more = stand.providers(),
+                preferences = if (signedIn) stand.signedInPreferences else NoctoriumPreferences(),
+                system = bridge,
+                credentials = if (signedIn) stand.signedIn() else app.noctorium.settings.InMemorySecretStore(),
+            )
+            return state to Tui(state, parts, web = null).also { it.page = Page.SETTINGS }
+        }
+        val themes = listOf(
+            ThemePreset.NOCTORIUM_NIGHT to "night",
+            ThemePreset.CATPPUCCIN_LATTE to "latte",
+            ThemePreset.WINDOWS_98 to "98",
+            ThemePreset.WINDOWS_XP to "xp",
+        )
+
+        val (state, tui) = open(signedIn = false)
+        try {
+            Thread.sleep(500)
+            for ((theme, name) in themes) {
+                state.setTheme(theme)
+                waitFor(5_000) { state.settings.value.preferences.theme == theme }
+                SettingsIndex.jump(tui, "spotify")
+                write(folder, "later-spotify-bandcamp-$name", tui)
+                SettingsIndex.jump(tui, "tidalRedirect")
+                write(folder, "later-signed-out-$name", tui)
+                write(folder, "later-signed-out-$name-narrow", tui, 84, 30)
+            }
+            state.setTheme(ThemePreset.NOCTORIUM_NIGHT)
+            waitFor(5_000) { state.settings.value.preferences.theme == ThemePreset.NOCTORIUM_NIGHT }
+            SettingsIndex.jump(tui, "appleMusic")
+            tui.press(Input.Key(Keys.ENTER))
+            write(folder, "later-apple-music-notice", tui)
+            tui.overlays.clear()
+            SettingsIndex.jump(tui, "tidal")
+            tui.press(Input.Key(Keys.ENTER))
+            write(folder, "later-tidal-app", tui)
+            tui.overlays.clear()
+            state.configureTidalApplication("made-up-client-id", "")
+            waitFor(5_000) { state.settings.value.tidal.configured }
+            Settings.overSsh = { true }
+            SettingsIndex.jump(tui, "tidal")
+            write(folder, "later-tidal-over-ssh", tui)
+            tui.press(Input.Key(Keys.ENTER))
+            write(folder, "later-tidal-over-ssh-notice", tui)
+            tui.overlays.clear()
+            Settings.overSsh = { app.noctorium.cli.TerminalBridge.overSsh() }
+            tui.settingsQuery = "client id"
+            tui.settingsSearchFocused = true
+            write(folder, "later-search-client-id", tui)
+            tui.settingsQuery = "apple music"
+            write(folder, "later-search-apple-music", tui)
+            SettingsIndex.close(tui)
+
+            // A search of every service, the three ticked for it, and their songs, albums and artists badged.
+            for (provider in listOf(app.noctorium.domain.ProviderType.APPLE_MUSIC, app.noctorium.domain.ProviderType.DEEZER, app.noctorium.domain.ProviderType.TIDAL)) {
+                state.setHybridSearchService(provider, true)
+            }
+            state.search("tycho")
+            waitFor(10_000) { !state.ui.value.searchLoading && state.ui.value.searchResults.tracks.size >= 4 }
+            tui.searchText = "tycho"
+            tui.searchFocused = false
+            tui.page = Page.SEARCH
+            for ((theme, name) in themes) {
+                state.setTheme(theme)
+                waitFor(5_000) { state.settings.value.preferences.theme == theme }
+                write(folder, "later-search-$name", tui)
+            }
+            state.setTheme(ThemePreset.NOCTORIUM_NIGHT)
+            waitFor(5_000) { state.settings.value.preferences.theme == ThemePreset.NOCTORIUM_NIGHT }
+            write(folder, "later-search-night-narrow", tui, 100, 30)
+            state.setSearchMode(app.noctorium.core.SearchMode.TIDAL)
+            write(folder, "later-search-tidal-chip", tui, 100, 30)
+            state.setSearchMode(app.noctorium.core.SearchMode.HYBRID)
+        } finally {
+            Settings.overSsh = { app.noctorium.cli.TerminalBridge.overSsh() }
+            state.close()
+        }
+
+        val (signed, signedTui) = open(signedIn = true)
+        try {
+            waitFor(10_000) { signed.settings.value.tidal.connected && signed.settings.value.appleMusic.ownDeveloperToken }
+            for ((theme, name) in themes) {
+                signed.setTheme(theme)
+                waitFor(5_000) { signed.settings.value.preferences.theme == theme }
+                SettingsIndex.jump(signedTui, "tidalRedirect")
+                write(folder, "later-signed-in-$name", signedTui)
+            }
+            signed.setTheme(ThemePreset.NOCTORIUM_NIGHT)
+            signed.refreshLibrary(force = true)
+            waitFor(10_000) { signed.library.value.playlists.count { it.title == "Evening" } >= 3 }
+            signedTui.page = Page.LIBRARY
+            write(folder, "later-library", signedTui)
+        } finally {
+            signed.setTheme(ThemePreset.NOCTORIUM_NIGHT)
+            signed.close()
+        }
+    }
+
+    /**
      * The visualiser drawn from a real mpv measuring real sound, with nothing to hear: mpv plays to its null output
      * a sweep from the bass up over pink noise, made by ffmpeg, and the Playlist layout is drawn as it plays. Needs
      * `-Dnoctorium.live=true` as well, ffmpeg on the path, and mpv where `-Dnoctorium.mpv` says or on the path.

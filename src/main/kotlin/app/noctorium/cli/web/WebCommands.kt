@@ -292,6 +292,11 @@ class WebCommands(
                 "soundcloud" -> state.disconnectAccount(ProviderType.SOUNDCLOUD)
                 "bandcamp" -> state.setBandcampUsername("")
                 "vk" -> state.disconnectVk()
+                "applemusic" -> state.disconnectAppleMusic()
+                // A public profile, as Bandcamp's collection is: forgotten, and its lists leave the library.
+                "deezer" -> state.setDeezerProfile("")
+                // The sign-in only: the Tidal app of the listener's own stays, to sign in through again.
+                "tidal" -> state.disconnectTidal()
                 "spotify" -> state.disconnectSpotify()
                 "lastfm" -> state.disconnectLastFm()
                 "librefm" -> state.disconnectLibreFm()
@@ -323,6 +328,16 @@ class WebCommands(
             "spotifyDevice" -> state.chooseSpotifyDevice(command.string("id").orEmpty())
             // VK's session, pasted from a browser signed in on vk.ru; core checks it with VK before keeping it.
             "vkSignIn" -> state.completeVkSignIn(command.string("text")?.takeIf(String::isNotBlank) ?: return "No cookies")
+            // Apple Music's media-user-token, pasted from a signed-in browser, or a Cookie: line with it in; core
+            // checks it with Apple before keeping it. A developer token of the listener's own, or a blank for none.
+            "appleMusicSignIn" -> state.completeAppleMusicSignIn(command.string("text")?.takeIf(String::isNotBlank) ?: return "No token")
+            "appleMusicDeveloperToken" -> state.setAppleMusicDeveloperToken(command.string("token") ?: return "No token")
+            // A Deezer profile's link, share link or number, checked with Deezer before it is kept; a blank takes it out.
+            "deezerProfile" -> state.setDeezerProfile(command.string("profile") ?: return "No profile")
+            // A Tidal app of the listener's own, blanks for none; and its sign-in, whose page opens in a browser on the
+            // computer running Noctorium, where Tidal's answer arrives.
+            "tidalApp" -> state.configureTidalApplication(command.string("clientId") ?: return "No client id", command.string("secret").orEmpty())
+            "tidal" -> state.connectTidal()
             // Last.fm's and Libre.fm's page opens in a browser on the computer running Noctorium, if it has one, and
             // the page that asked has it in the settings part's approvalUrl to open or copy itself; allowed in any
             // browser, the sign-in finishes by itself, or with Finish.

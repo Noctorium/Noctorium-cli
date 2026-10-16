@@ -3,9 +3,11 @@ package app.noctorium.cli.tui
 import app.noctorium.bandcamp.BandcampGenre
 import app.noctorium.cli.CliHome
 import app.noctorium.cli.DesktopSignIn
+import app.noctorium.cli.TerminalBridge
 import app.noctorium.cli.cliVersion
 import app.noctorium.cli.update.CliUpdates
 import app.noctorium.domain.ProviderType
+import app.noctorium.domain.betaWarning
 import app.noctorium.lyrics.LyricsProviderId
 import app.noctorium.playback.PlaybackTool
 import app.noctorium.playback.PlaybackToolInstaller
@@ -22,7 +24,7 @@ import app.noctorium.settings.ProgressBarStyle
 import app.noctorium.settings.QueueColumn
 import app.noctorium.settings.ScrobbleConnectionStatus
 import app.noctorium.settings.ScrobbleServiceState
-import app.noctorium.settings.DEFAULT_HYBRID_SEARCH
+import app.noctorium.settings.HYBRID_SEARCH_SERVICES
 import app.noctorium.settings.ThemePreset
 import app.noctorium.settings.ThemeSkin
 import app.noctorium.settings.TimeDisplay
@@ -30,6 +32,7 @@ import app.noctorium.settings.VisualiserStyle
 import app.noctorium.settings.showsPlayerButton
 import app.noctorium.settings.themeSkin
 import app.noctorium.settings.withPlayerButton
+import app.noctorium.tidal.TidalAuth
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -307,10 +310,16 @@ object Settings {
             ),
         )
         val asked = HYBRID_SERVICES.filter { it in preferences.hybridSearch }
+        // The ones left out, where they are fewer: a fresh install asks every service but Apple Music, Deezer and Tidal.
+        val left = HYBRID_SERVICES - asked.toSet()
         add(
             Row.Action(
                 "Hybrid search asks",
-                value = if (asked.size == HYBRID_SERVICES.size) "Every service" else asked.joinToString { it.displayName },
+                value = when {
+                    left.isEmpty() -> "Every service"
+                    left.size < asked.size -> "Every service but " + names(left)
+                    else -> asked.joinToString { it.displayName }
+                },
                 run = { tui.overlays.addLast(hybridSearch(tui)) },
                 id = "hybridSearch",
             ),
@@ -366,6 +375,7 @@ object Settings {
         // and two rows of Home, its songs played matched on YouTube Music; and Premium, which also lets the
         // account's own Spotify app play them, wherever it is open. Either opens the browser on this computer.
         val spotify = settings.spotify
+        betaWarning(ProviderType.SPOTIFY)
         add(
             Row.Action(
                 "Spotify",
@@ -423,6 +433,7 @@ object Settings {
         // is what is kept; the fan's own name for themselves is known once Bandcamp has confirmed it, here.
         val bandcamp = settings.bandcamp
         val fan = preferences.bandcampUsername
+        betaWarning(ProviderType.BANDCAMP)
         add(
             Row.Action(
                 "Bandcamp collection",
@@ -448,6 +459,7 @@ object Settings {
         )
         // VK: a browser's vk.ru session, pasted, since there is no browser here to sign in with.
         val vk = settings.vk
+        betaWarning(ProviderType.VK)
         add(
             Row.Action(
                 "VK Music",
@@ -466,6 +478,11 @@ object Settings {
             ),
         )
         vk.message?.let { add(Row.Note(it)) }
+        // Apple Music, Deezer and Tidal are searched, and their links opened, with nothing set up here; what is set up
+        // adds the library and Home's rows. None of them hands out its audio, so every song is matched on YouTube Music.
+        addAll(appleMusic(tui))
+        addAll(deezer(tui))
+        addAll(tidal(tui))
         add(Row.Gap)
 
         // --- This device: the keys, where things are kept, and the tools that play. ---
@@ -917,7 +934,238 @@ object Settings {
         )
     }
 
-    private fun vkNotice(tui: Tui): Overlay = Overlay.Notice("Signing in to VK", VK_NOTICE + VK_COOKIES_HOW) {
+    /**
+     * [provider]'s beta warning above its sign-in, where it has one: core decides which services are in beta and
+     * says the same of them in every player. Apart from the service before it, so it is plain whose it is, and in the
+     * warning's colour, wrapped to [WARNING_WIDTH] since a note is a line.
+     */
+    private fun MutableList<Row>.betaWarning(provider: ProviderType) {
+        val warning = provider.betaWarning ?: return
+        if (lastOrNull() !is Row.Header) add(Row.Gap)
+        wrapWords(warning, WARNING_WIDTH).forEach { add(Row.Note(it, Row.Tone.WARN)) }
+    }
+
+    /**
+     * How wide the beta warning's lines are: what an 80-column terminal's list has room for, whatever this one has. Not
+     * the list's own width, which would move every row under the warnings each time the terminal is resized, and a
+     * setting jumped to by its row with them.
+     */
+    const val WARNING_WIDTH = 78
+
+    /**
+     * Apple Music: signed in with the token Apple's own web player keeps once somebody has signed in on Apple's page.
+     * A terminal cannot show that page, so the token is pasted from a browser that is signed in, after saying where
+     * it is (see [APPLE_MUSIC_HOW]); core checks it with Apple before keeping it. Its developer token is the web
+     * player's unless the listener has one of their own, made with a MusicKit key of theirs.
+     */
+    private fun appleMusic(tui: Tui): List<Row> = buildList {
+        val state = tui.state
+        val apple = state.settings.value.appleMusic
+        betaWarning(ProviderType.APPLE_MUSIC)
+        add(
+            Row.Action(
+                "Apple Music",
+                value = when {
+                    apple.checking -> "Checking with Apple…"
+                    apple.connected -> "Signed in" + apple.storefront.takeIf(String::isNotBlank)?.let { " · the ${it.uppercase()} store" }.orEmpty()
+                    else -> "Not signed in: Enter says how"
+                },
+                detail = "search and links work without".takeIf { !apple.connected && !apple.checking },
+                tone = if (apple.connected && !apple.checking) Row.Tone.GOOD else Row.Tone.QUIET,
+                run = { if (!apple.checking) tui.overlays.addLast(appleMusicMenu(tui)) },
+                id = "appleMusic",
+            ),
+        )
+        add(
+            Row.Action(
+                "Apple Music developer token",
+                value = if (apple.ownDeveloperToken) "Your own" else "Optional: the web player's is used",
+                run = { tui.overlays.addLast(appleMusicDeveloperToken(tui)) },
+                id = "appleMusicToken",
+            ),
+        )
+        apple.message?.let { add(Row.Note(it)) }
+    }
+
+    private fun appleMusicMenu(tui: Tui): Overlay {
+        val state = tui.state
+        if (!state.settings.value.appleMusic.connected) return appleMusicNotice(tui)
+        return Overlay.Picker(
+            "Apple Music",
+            listOf(
+                "Sign in again, with another token…" to { tui.overlays.addLast(appleMusicNotice(tui)) },
+                "Sign out" to {
+                    tui.overlays.addLast(Overlay.Confirm("Sign out of Apple Music here?", "The token is forgotten on this computer; nothing changes at Apple.") { state.disconnectAppleMusic() })
+                },
+            ),
+        )
+    }
+
+    private fun appleMusicNotice(tui: Tui): Overlay =
+        Overlay.Notice("Signing in to Apple Music", listOfNotNull(ProviderType.APPLE_MUSIC.betaWarning) + APPLE_MUSIC_HOW) {
+            tui.overlays.addLast(
+                Overlay.Prompt("Apple Music sign-in", "The media-user-token cookie, or a Cookie: line with it in.", secret = true) { text ->
+                    if (text.isNotBlank()) tui.state.completeAppleMusicSignIn(text)
+                },
+            )
+        }
+
+    /** A developer token of the listener's own, or the web player's again: once one is kept, Enter offers either. */
+    private fun appleMusicDeveloperToken(tui: Tui): Overlay {
+        val state = tui.state
+        val ask = Overlay.Prompt("Apple Music developer token", "A MusicKit developer token of your own, made with your key.", secret = true) { token ->
+            if (token.isNotBlank()) state.setAppleMusicDeveloperToken(token)
+        }
+        if (!state.settings.value.appleMusic.ownDeveloperToken) return ask
+        return Overlay.Picker(
+            "Apple Music developer token",
+            listOf(
+                "Another token of your own…" to { tui.overlays.addLast(ask) },
+                "Use the web player's again" to { state.setAppleMusicDeveloperToken("") },
+            ),
+        )
+    }
+
+    /**
+     * Deezer: a public profile rather than a sign-in, as Bandcamp's collection is -- Deezer shows one to anybody, and
+     * lets no new application sign anybody in. Its link, a share link or its number is all it takes; core checks it
+     * with Deezer before keeping it, and the profile's own name is known once it has.
+     */
+    private fun deezer(tui: Tui): List<Row> = buildList {
+        val deezer = tui.state.settings.value.deezer
+        betaWarning(ProviderType.DEEZER)
+        add(
+            Row.Action(
+                "Deezer profile",
+                value = when {
+                    deezer.checking -> "Checking with Deezer…"
+                    deezer.found -> listOfNotNull(deezer.name.takeIf(String::isNotBlank), "deezer.com/profile/${deezer.profileId}").joinToString(" · ")
+                    else -> "Not set"
+                },
+                detail = "search and links work without one".takeIf { !deezer.found && !deezer.checking },
+                tone = if (deezer.found && !deezer.checking) Row.Tone.GOOD else Row.Tone.QUIET,
+                run = { if (!deezer.checking) tui.overlays.addLast(deezerMenu(tui)) },
+                id = "deezer",
+            ),
+        )
+        deezer.message?.let { add(Row.Note(it, if (it == DEEZER_REMOVED || it.startsWith(DEEZER_SHOWN)) Row.Tone.QUIET else Row.Tone.WARN)) }
+    }
+
+    private fun deezerMenu(tui: Tui): Overlay {
+        val state = tui.state
+        val current = state.settings.value.deezer.profileId
+        val ask = Overlay.Prompt("Deezer", "Your profile's link, deezer.com/profile/<number>, a share link, or the number.", current) {
+            if (it.isNotBlank()) state.setDeezerProfile(it)
+        }
+        if (current.isBlank()) return ask
+        return Overlay.Picker(
+            "Deezer",
+            listOf(
+                "Another profile…" to { tui.overlays.addLast(ask) },
+                "Take the profile out of the library" to {
+                    tui.overlays.addLast(Overlay.Confirm("Take your Deezer profile out of the library?", "Nothing changes on Deezer; the profile is forgotten here.") { state.setDeezerProfile("") })
+                },
+            ),
+            "Not a sign-in: a profile is public.",
+        )
+    }
+
+    /**
+     * Tidal: its own sign-in page, through a Tidal app of the listener's own until Noctorium has one -- registered,
+     * free, at developer.tidal.com, with the redirect address here among its redirect URIs. Tidal sends its answer to
+     * that address, 127.0.0.1 on this computer, so the browser has to be on this one; over ssh that is said first.
+     */
+    private fun tidal(tui: Tui): List<Row> = buildList {
+        val state = tui.state
+        val tidal = state.settings.value.tidal
+        val remote = overSsh()
+        betaWarning(ProviderType.TIDAL)
+        add(
+            Row.Action(
+                "Tidal",
+                value = when {
+                    tidal.connecting -> "Waiting for the browser…"
+                    tidal.connected -> "Connected" + tidal.accountName.takeIf(String::isNotBlank)?.let { " as $it" }.orEmpty()
+                    !tidal.configured -> "Needs a Tidal app of your own first"
+                    else -> "Not connected: Enter signs in"
+                },
+                detail = when {
+                    tidal.connected || tidal.connecting -> null
+                    !tidal.configured -> "Enter sets one up"
+                    remote -> "with a browser here only"
+                    tidal.readsCatalogue -> "search works without"
+                    else -> "with this computer's browser"
+                },
+                tone = if (tidal.connected) Row.Tone.GOOD else Row.Tone.QUIET,
+                run = {
+                    when {
+                        tidal.connected -> tui.overlays.addLast(
+                            Overlay.Confirm("Disconnect Tidal?", "Your Tidal collection leaves the library; nothing changes at Tidal.") { state.disconnectTidal() },
+                        )
+                        tidal.connecting -> Unit
+                        !tidal.configured -> tui.overlays.addLast(tidalAppMenu(tui))
+                        remote -> tui.overlays.addLast(Overlay.Notice("Signing in to Tidal", TIDAL_OVER_SSH, "Enter opens it on this computer anyway") { state.connectTidal() })
+                        else -> state.connectTidal()
+                    }
+                },
+                id = "tidal",
+            ),
+        )
+        if (remote && !tidal.connected) add(Row.Note(TIDAL_OVER_SSH_SHORT, Row.Tone.WARN))
+        add(
+            Row.Action(
+                "Use your own Tidal app",
+                value = when {
+                    !tidal.ownApp -> "Not set: Enter gives its client id and secret"
+                    tidal.readsCatalogue && !tidal.connected -> "Yours, with its secret: Tidal is searched signed out"
+                    else -> "Yours"
+                },
+                tone = if (tidal.ownApp) Row.Tone.NORMAL else Row.Tone.QUIET,
+                run = { tui.overlays.addLast(tidalAppMenu(tui)) },
+                id = "tidalApp",
+            ),
+        )
+        add(
+            Row.Action(
+                "Tidal redirect address",
+                value = tidal.redirectUri,
+                detail = "your app's redirect URIs need it exactly · Enter copies it",
+                run = { state.copyTidalRedirectUri() },
+                id = "tidalRedirect",
+            ),
+        )
+        tidal.message?.let { add(Row.Note(it)) }
+    }
+
+    private fun tidalAppMenu(tui: Tui): Overlay {
+        val state = tui.state
+        val own = state.settings.value.tidal.ownApp
+        val options = buildList<Pair<String, () -> Unit>> {
+            add((if (own) "Another client id and secret…" else "Its client id and secret…") to { tui.overlays.addLast(tidalClientId(tui)) })
+            add("Copy the redirect address to register" to { state.copyTidalRedirectUri() })
+            add("Open Tidal's developer dashboard" to { state.openTidalDeveloperPortal() })
+            if (own) add("Stop using it" to {
+                tui.overlays.addLast(
+                    Overlay.Confirm("Stop using your own Tidal app?", "Its client id and secret are forgotten here, and the sign-in through it.") {
+                        state.configureTidalApplication("", "")
+                    },
+                )
+            })
+        }
+        return Overlay.Picker("Your own Tidal app", options, "Free to register, at developer.tidal.com.")
+    }
+
+    /** A Tidal app's client id, and then its secret, which may be left blank to sign in only. */
+    private fun tidalClientId(tui: Tui): Overlay = Overlay.Prompt("Your own Tidal app", "Its client id, from developer.tidal.com.") { id ->
+        if (id.isBlank()) return@Prompt
+        tui.overlays.addLast(
+            Overlay.Prompt("Your own Tidal app", "Its client secret, for Tidal to be searched signed out. Blank to sign in only.", secret = true) { secret ->
+                tui.state.configureTidalApplication(id, secret)
+            },
+        )
+    }
+
+    private fun vkNotice(tui: Tui): Overlay = Overlay.Notice("Signing in to VK", listOfNotNull(ProviderType.VK.betaWarning) + VK_NOTICE + VK_COOKIES_HOW) {
         tui.overlays.addLast(
             Overlay.Prompt("VK cookies", "p and remixsid, pasted as they are: p=…; remixsid=…", secret = true) { text ->
                 if (text.isNotBlank()) tui.state.completeVkSignIn(text)
@@ -933,7 +1181,7 @@ object Settings {
             "Hybrid search asks",
             HYBRID_SERVICES.map { it.displayName },
             HYBRID_SERVICES.indices.filter { HYBRID_SERVICES[it] in asked },
-            "Spotify only while its songs play on Spotify; VK once signed in",
+            "Spotify only while its songs play on Spotify; VK once signed in; Tidal with an app",
         ) { chosen ->
             val wanted = chosen.map { HYBRID_SERVICES[it] }.toSet()
             // Added before any is taken out, so the list is never empty on the way: core keeps one at least.
@@ -998,8 +1246,11 @@ object Settings {
     /** How long a sleep timer can fade out over, in seconds; none first. */
     private val FADES = listOf(0, 15, 30, 60)
 
-    /** Every service a Hybrid search can ask, in the order Settings shows them. */
-    private val HYBRID_SERVICES = DEFAULT_HYBRID_SEARCH.toList()
+    /**
+     * Every service a Hybrid search can ask, in the order Settings shows them: core's whole list, Apple Music, Deezer
+     * and Tidal among them, which a fresh install leaves out of its search but anybody can tick.
+     */
+    private val HYBRID_SERVICES = HYBRID_SEARCH_SERVICES
 
     /** What signing in to VK means, before anybody does it. Shown here, by `noctorium login vk`, and on the web. */
     val VK_NOTICE = listOf(
@@ -1015,6 +1266,42 @@ object Settings {
     )
 
     /**
+     * How Apple Music is signed in to from a terminal, which has no browser to show Apple's page in: shown here, by
+     * `noctorium login applemusic`, and on the web.
+     */
+    val APPLE_MUSIC_HOW = listOf(
+        "A terminal cannot show Apple's sign-in page, so the sign-in comes from a browser that can: sign in at " +
+            "music.apple.com there, and Apple's web player keeps your Apple Music token in its media-user-token cookie.",
+        "Open the browser's developer tools on music.apple.com and find its cookies (under Application in Chrome and " +
+            "Edge, Storage in Firefox and Safari), then copy the value of media-user-token. A request's whole Cookie: " +
+            "line, from the Network tab, does as well. It stays on this computer, in its credential store.",
+        "Search, albums and links work without signing in; signing in adds your playlists and songs to the library, " +
+            "and Home's rows from Apple Music.",
+    )
+
+    /** What Tidal's sign-in needs over ssh, said before it is begun: shown here, and by `noctorium login tidal`. */
+    val TIDAL_OVER_SSH = listOf(
+        "This terminal is reached over ssh, and Tidal's sign-in needs a browser on this computer: Tidal sends its " +
+            "answer to ${TidalAuth.redirectUri()}, which only a browser here can reach. Sign in at this computer, or " +
+            "forward the port from the one you are at first: ssh -L ${TidalAuth.REDIRECT_PORT}:127.0.0.1:${TidalAuth.REDIRECT_PORT}.",
+    )
+
+    /** The same, under Tidal's row in Settings. */
+    private val TIDAL_OVER_SSH_SHORT =
+        "Over ssh: Tidal's sign-in needs a browser on this computer, or its port forwarded " +
+            "(ssh -L ${TidalAuth.REDIRECT_PORT}:127.0.0.1:${TidalAuth.REDIRECT_PORT})."
+
+    /** Whether this terminal is reached over ssh; a test says so of its own. */
+    internal var overSsh: () -> Boolean = { TerminalBridge.overSsh() }
+
+    /**
+     * Core's words for a Deezer profile taken out on purpose, and the start of its words for one found: the Deezer
+     * messages that are not a problem. Only their colour, and whether `noctorium login deezer` succeeded, depend on these.
+     */
+    private const val DEEZER_REMOVED = "Deezer profile removed."
+    const val DEEZER_SHOWN = "Showing "
+
+    /**
      * "Catppuccin Mocha", "Noctorium Night", and "Nord" rather than "Nord Nord" -- or "Noctorium 98" rather than
      * "Windows Noctorium 98": a name that already starts with a family's, its own or another's, says whose it is.
      */
@@ -1024,6 +1311,11 @@ object Settings {
     }
 
     private fun onOff(on: Boolean) = if (on) "On" else "Off"
+
+    /** "Apple Music, Deezer and Tidal". */
+    private fun names(services: List<ProviderType>): String =
+        if (services.size < 2) services.joinToString { it.displayName }
+        else services.dropLast(1).joinToString { it.displayName } + " and " + services.last().displayName
 
     private fun tone(status: AccountConnectionStatus) = when (status) {
         AccountConnectionStatus.CONNECTED -> Row.Tone.GOOD

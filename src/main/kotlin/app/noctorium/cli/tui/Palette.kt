@@ -50,6 +50,11 @@ data class Palette(
     val spotify: Rgb get() = 0x1ED760
     val bandcamp: Rgb get() = if (light) 0x408294 else 0x629AA9
     val vk: Rgb get() = if (light) 0x0062D1 else 0x4C9BFF
+    // Apple Music's red, Deezer's violet and Tidal's black, each its own; Tidal's is turned to white on a dark page,
+    // where black letters would not be seen, and Deezer's lightened a little there to be read as easily as the rest.
+    val appleMusic: Rgb get() = if (light) 0xE0182F else 0xFA243C
+    val deezer: Rgb get() = if (light) 0x8F1FEA else 0xB565FF
+    val tidal: Rgb get() = if (light) 0x000000 else 0xF2F2F2
     val good: Rgb get() = if (light) 0x1E8E3E else 0x5FE3B0
     val warn: Rgb get() = if (light) 0xB26A00 else 0xFFC266
     val bad: Rgb get() = if (light) 0xC62828 else 0xFF6B6B

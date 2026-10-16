@@ -4,7 +4,7 @@
 
 # Noctorium CLI
 
-**YouTube Music, SoundCloud, Bandcamp, Spotify and VK, in a terminal — and in every browser in the house.**
+**YouTube Music, SoundCloud, Bandcamp, Spotify, VK, Apple Music, Deezer and Tidal, in a terminal — and in every browser in the house.**
 
 </div>
 
@@ -23,13 +23,14 @@ noctorium web                   the web player, for any browser on your network
 ## What it does
 
 - **Every service in one place.** Home, search and your library from YouTube Music, SoundCloud, Bandcamp,
-  Spotify and VK, one queue for all of it. Spotify's songs play matched on YouTube Music, or with Premium
-  in your own Spotify app, wherever it is open.
+  Spotify, VK, Apple Music, Deezer and Tidal, one queue for all of it. Spotify's, Apple Music's, Deezer's and
+  Tidal's songs play matched on YouTube Music, and Spotify's, with Premium, in your own Spotify app too.
 - **Made yours.** The speed, from half to double; a volume booster up to 1000%, always behind a limiter, so it
   gets loud rather than broken; carrying on with similar songs when the queue runs out, or from a song picked on
   Home; which services a search of all of them asks, or one service with a bang (`!ytm`, `!sc`, `!sp`, `!bc`,
-  `!vk`, `!all`); a sleep timer that fades out, or stop after this song; and every key. Settings is in sections,
-  with a search (`/` there) that finds a setting by its name or another word for it — "dark mode", "louder".
+  `!vk`, `!am`, `!dz`, `!td`, `!all`); a sleep timer that fades out, or stop after this song; and every key.
+  Settings is in sections, with a search (`/` there) that finds a setting by its name or another word for it —
+  "dark mode", "louder".
 - **A queue that keeps.** What autoplay will carry on with is shown under the queue, from the last song's own
   service or YouTube Music's radio, to play, keep or drop. What is next can be shuffled or cleared, everything but
   the song playing cleared, the queue saved as a playlist, and it is still there, where it was left, the next
@@ -123,9 +124,22 @@ VK, typed in when it asks or given with `--cookies "p=…; remixsid=…"`. That 
 may ask you to confirm it is you, or freeze an account it thinks is automated; it says so before it asks.
 Many songs do not play outside Russia, and VK's songs cannot be downloaded.
 
+Apple Music, Deezer and Tidal are searched, and their links opened, with nothing set up; what is set up adds
+your library and their rows on Home. Deezer is a public profile, as Bandcamp is a name:
+`noctorium login deezer <profile>`, with your profile's link or its number. Tidal signs in on its own page in a
+browser on this computer, through a Tidal app of your own until Noctorium has one — register it, free, at
+developer.tidal.com with `http://127.0.0.1:8889/noctorium/tidal` among its redirect URIs, then
+`noctorium login tidal --client-id <id>` (and `--secret <secret>` to search Tidal before signing in). A
+terminal cannot show Apple's sign-in page, so `noctorium login applemusic` takes the `media-user-token` cookie
+from a browser signed in at music.apple.com, and says where to find it first.
+
+Every service but YouTube Music, YouTube and SoundCloud is in beta, and says so at its sign-in, in Settings and
+here: it may not work as it should, and there is a small chance it gets your account blocked. Use it at your
+own risk.
+
 `noctorium settings` shows how it plays, and changes it: `noctorium settings speed 1.25`, `autoplay off`,
 `autoplay-from youtube` (or `same`, the song's own service), `avoid-recent off`, `keep-queue off`, `fade 30`,
-`hybrid vk off`.
+`hybrid vk off`, `hybrid deezer on`.
 
 ## The keys
 
@@ -173,9 +187,10 @@ In the desktop's data folder, under `cli/` — `%LOCALAPPDATA%\Noctorium\cli` on
 `~/Library/Application Support/Noctorium/cli` on a Mac, `~/.local/share/noctorium/cli` on Linux — with its
 own settings, so the two never write over each other. The queue is kept there between launches, in
 `queue.json`, by the player and `noctorium web`; the other commands leave it alone. mpv and yt-dlp the desktop
-already downloaded are used rather than fetched again. Secrets (Spotify, Last.fm, Libre.fm, VK's session) go to DPAPI on Windows, the Keychain on a
-Mac and the desktop keyring through `secret-tool` on Linux; on a machine with no keyring they are kept for the
-session only, never written to a file.
+already downloaded are used rather than fetched again. Secrets (Spotify, Last.fm, Libre.fm, VK's session, Apple
+Music's token, a Tidal app and its sign-in) go to DPAPI on Windows, the Keychain on a Mac and the desktop
+keyring through `secret-tool` on Linux; on a machine with no keyring they are kept for the session only, never
+written to a file.
 
 ## Building
 
@@ -194,4 +209,4 @@ cd Noctorium-cli
 ---
 
 <sub>Free software under the GPL-3.0. Noctorium is an independent client and not affiliated with Google,
-YouTube, SoundCloud, Bandcamp, Spotify, VK, Last.fm, Libre.fm, ListenBrainz or Discord.</sub>
+YouTube, SoundCloud, Bandcamp, Spotify, VK, Apple, Deezer, Tidal, Last.fm, Libre.fm, ListenBrainz or Discord.</sub>

@@ -187,22 +187,21 @@ object Pages {
         val results = ui.searchResults
         if (ui.searchQuery.isBlank()) {
             add(Row.Note("Type what you are looking for. Every service is searched at once; Tab changes which."))
-            add(Row.Note("Or one service for one search: !ytm, !sc, !sp, !bc or !vk before or after the words, !all for every one."))
+            add(Row.Note("Or one service for one search: !ytm, !sc, !sp, !bc, !vk, !am, !dz or !td before or after the words, !all for every one."))
             return@buildList
         }
         /*
-         * Bandcamp and Spotify answer with their albums and artists as playlists, which is what lets Enter
-         * open either like any other list, so they are listed under what they are rather than as playlists.
-         * The same albums and artists come a second time as bare names, in `albums` and `artists`, and are
-         * left out there: a name can only be searched for again, and the playlist above it already opens it.
+         * Bandcamp, Spotify, Apple Music, Deezer and Tidal answer with their albums and artists as playlists, which
+         * is what lets Enter open one like any other list, so they are listed under what they are rather than as
+         * playlists. The same albums and artists come a second time as bare names, in `albums` and `artists`, and
+         * are left out there: a name can only be searched for again, and the playlist above it already opens it.
          */
-        val opened = setOf(ProviderType.BANDCAMP, ProviderType.SPOTIFY)
         val byKind = results.playlists.groupBy { it.kind }
         val playlists = byKind[ListKind.PLAYLIST].orEmpty()
         val openableAlbums = byKind[ListKind.ALBUM].orEmpty()
         val openableArtists = byKind[ListKind.ARTIST].orEmpty()
-        val albums = results.albums.filter { it.provider !in opened }
-        val artists = results.artists.filter { it.provider !in opened }
+        val albums = results.albums.filter { !it.provider.opensReleases }
+        val artists = results.artists.filter { !it.provider.opensReleases }
         if (results.tracks.isNotEmpty()) {
             add(Row.Header("Tracks", "${results.tracks.size}"))
             results.tracks.forEach { add(Row.Song(it, results.tracks, PlaybackOrigin.SEARCH)) }
@@ -276,10 +275,10 @@ object Pages {
         library.errorMessage?.let { add(Row.Note(it, Row.Tone.BAD)) }
         val byService = library.playlists.groupBy { it.provider }
         // Bandcamp's are a fan's collection, a playlist for each release, and their wishlist; VK's, My music
-        // and then the account's playlists.
+        // and then the account's playlists; Deezer's, a public profile's playlists, loved tracks and albums.
         listOf(
             ProviderType.YOUTUBE_MUSIC, ProviderType.YOUTUBE_VIDEO, ProviderType.SOUNDCLOUD, ProviderType.SPOTIFY,
-            ProviderType.BANDCAMP, ProviderType.VK,
+            ProviderType.BANDCAMP, ProviderType.VK, ProviderType.APPLE_MUSIC, ProviderType.DEEZER, ProviderType.TIDAL,
         ).forEach { provider ->
             val lists = byService[provider].orEmpty()
             if (lists.isEmpty()) return@forEach
@@ -478,9 +477,10 @@ object Pages {
         bang(tui, canvas, x + w - 2, y + 1, field)
         // The service chips, Tab cycles them; a bang typed lights its service's chip instead.
         var cx = x + 1
+        val names = modeNames(tui.state.ui.value.activeSearchMode, w - 2, perChip = 3)
         SearchMode.entries.forEach { mode ->
             val active = tui.state.ui.value.activeSearchMode == mode
-            val label = " ${mode.displayName} "
+            val label = " ${names.getValue(mode)} "
             val used = canvas.write(cx, y + 3, label, if (active) p.onAccent else p.subtext, if (active) p.accent else null, if (active) BOLD else 0)
             val target = mode
             tui.clickTargets += Tui.ClickTarget(cx, y + 3, used, 1) { tui.state.setSearchMode(target) }
@@ -506,13 +506,28 @@ object Pages {
         tui.clickTargets += Tui.ClickTarget(x, y, w, 3) { tui.searchFocused = true }
         bang(tui, canvas, x + w - 2, y + 1, Skin.window(p))
         var cx = x + 1
+        val names = modeNames(tui.state.ui.value.activeSearchMode, w - 2, perChip = 5)
         SearchMode.entries.forEach { mode ->
             val active = tui.state.ui.value.activeSearchMode == mode
             Skin.radio(canvas, p, cx, y + 3, active)
-            val used = 2 + canvas.write(cx + 2, y + 3, mode.displayName, Skin.text(p), null, if (active) BOLD else 0)
+            val used = 2 + canvas.write(cx + 2, y + 3, names.getValue(mode), Skin.text(p), null, if (active) BOLD else 0)
             val target = mode
             tui.clickTargets += Tui.ClickTarget(cx, y + 3, used, 1) { tui.state.setSearchMode(target) }
             cx += used + 3
+        }
+    }
+
+    /**
+     * What each search mode's chip says across [room] cells, each taking [perChip] more than its words: every one by
+     * its name while they all fit, and otherwise the one in force by its name and the rest by their badges' letters --
+     * ten services' names do not fit across most terminals.
+     */
+    internal fun modeNames(active: SearchMode, room: Int, perChip: Int): Map<SearchMode, String> {
+        val full = SearchMode.entries.associateWith { it.displayName }
+        if (full.values.sumOf { Canvas.displayWidth(it) + perChip } <= room) return full
+        return SearchMode.entries.associateWith { mode ->
+            if (mode == active) mode.displayName
+            else ProviderType.entries.firstOrNull { it.name == mode.name }?.badge() ?: mode.displayName
         }
     }
 

@@ -118,7 +118,7 @@ class ServicesPagesTest {
     fun `Settings has both Spotify sign-ins, where its songs play, VK, and the ways of listening`() {
         waitFor { state.settings.value.spotify.canPlay && state.settings.value.vk.connected }
         tui.page = Page.SETTINGS
-        val page = drawn("settings", h = 64)
+        val page = drawn("settings", h = 100)
         fun row(label: String) = page.firstOrNull { it.trim().startsWith(label) || it.trim().startsWith("› $label") } ?: ""
         assertTrue("Not connected" in row("Spotify "), page.joinToString("\n"))
         assertTrue("Signed in: Spotify songs can play in your Spotify app" in row("Spotify Premium"), row("Spotify Premium"))
@@ -128,7 +128,8 @@ class ServicesPagesTest {
         assertTrue("1× (as recorded)" in row("Speed"), row("Speed"))
         assertTrue("Carry on with songs like the last" in row("When the queue runs out"), row("When the queue runs out"))
         assertTrue("No: it stops at once" in row("Sleep timer fades out"), row("Sleep timer fades out"))
-        assertTrue("Every service" in row("Hybrid search asks"), row("Hybrid search asks"))
+        // A fresh install asks every service but the three only ever matched on YouTube Music, which can be ticked.
+        assertTrue("Every service but Apple Music, Deezer and Tidal" in row("Hybrid search asks"), row("Hybrid search asks"))
         assertTrue("As they came" in row("Keys"), row("Keys"))
     }
 

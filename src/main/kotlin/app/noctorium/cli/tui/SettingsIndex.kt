@@ -73,6 +73,12 @@ object SettingsIndex {
         entry("bandcamp", "Bandcamp collection", Settings.SERVICES, "A fan's collection and wishlist in the library.", "bandcamp", "fan", "collection", "bc"),
         entry("bandcampGenres", "Bandcamp on Home", Settings.SERVICES, "Which genres Home has a row of Bandcamp's best-sellers for.", "genres", "home"),
         entry("vk", "VK Music", Settings.SERVICES, "Sign in with a browser's vk.ru session.", "vk", "vkontakte", "sign in", "cookies"),
+        entry("appleMusic", "Apple Music", Settings.SERVICES, "Sign in with a browser's media-user-token cookie, for your library and Home.", "apple", "applemusic", "itunes", "am", "sign in", "cookie", "media-user-token", "token"),
+        entry("appleMusicToken", "Apple Music developer token", Settings.SERVICES, "A MusicKit developer token of your own, in place of the web player's.", "developer token", "musickit", "jwt"),
+        entry("deezer", "Deezer profile", Settings.SERVICES, "A public Deezer profile's playlists, loved tracks and albums in the library.", "deezer", "dz", "profile", "flow"),
+        entry("tidal", "Tidal", Settings.SERVICES, "Sign in on Tidal's own page, for your collection and mixes.", "tidal", "td", "sign in", "connect tidal", "account"),
+        entry("tidalApp", "Use your own Tidal app", Settings.SERVICES, "The client id and secret of a Tidal app you registered at developer.tidal.com.", "client id", "client secret", "secret", "developer", "tidal app"),
+        entry("tidalRedirect", "Tidal redirect address", Settings.SERVICES, "The address to register in your Tidal app, to copy.", "redirect uri", "redirect url", "callback", "copy", "loopback"),
 
         entry("keys", "Keys", Settings.DEVICE, "Every key the player answers to, and changing them.", "hotkeys", "shortcuts", "keyboard", "bindings", "keybindings"),
         entry("downloads", "Downloads go to", Settings.DEVICE, "The folder saved MP3s are written to.", "folder", "export", "mp3", "save"),

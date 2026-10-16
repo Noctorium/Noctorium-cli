@@ -79,6 +79,15 @@ class SettingsIndexTest {
         assertEquals("playerBar", first("toolbar 2"))
         assertEquals("playerButtons", first("stop button"))
         assertEquals("playerButtons", first("hide buttons"))
+        // Apple Music, Deezer and Tidal, by their names and by what their setups ask for.
+        assertEquals("appleMusic", first("apple music"))
+        assertEquals("appleMusic", first("media-user-token"))
+        assertEquals("appleMusicToken", first("developer token"))
+        assertEquals("deezer", first("deezer"))
+        assertEquals("tidal", first("tidal"))
+        assertEquals("tidalApp", first("client id"))
+        assertEquals("tidalApp", first("client secret"))
+        assertEquals("tidalRedirect", first("redirect uri"))
         // A typo forgiven in a long word.
         assertEquals("equaliser", first("equaliserr"))
         assertEquals(null, first("nothing like any of them xyzzy"))
