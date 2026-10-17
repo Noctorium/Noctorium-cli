@@ -1468,9 +1468,11 @@ object Settings {
     /**
      * "Catppuccin Mocha", "Noctorium Night", and "Nord" rather than "Nord Nord" -- or "Noctorium 98" rather than
      * "Windows Noctorium 98": a name that already starts with a family's, its own or another's, says whose it is.
+     * So does one with its family's in it anywhere: "Afterglow" rather than "Glow Afterglow", beside "Glow Cinder".
      */
     fun themeName(theme: ThemePreset): String = when {
         ThemePreset.entries.any { theme.displayName.startsWith(it.family) } -> theme.displayName
+        theme.displayName.contains(theme.family, ignoreCase = true) -> theme.displayName
         else -> "${theme.family} ${theme.displayName}"
     }
 

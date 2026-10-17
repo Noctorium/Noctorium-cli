@@ -299,7 +299,7 @@ class LooksTest {
         Settings.rows(tui).filterIsInstance<Row.Action>().first { it.label == "Theme" }.run()
         val picker = assertIs<Overlay.Picker>(tui.overlays.last())
         val names = picker.options.map { it.first }
-        assertEquals(20, names.size)
+        assertEquals(ThemePreset.entries.count { it.colours != null }, names.size)
         assertEquals(listOf("Windows 98", "Noctorium 98", "Windows XP"), names.subList(names.indexOf("Windows 98"), names.indexOf("Windows 98") + 3))
         picker.options.first { it.first == "Noctorium 98" }.second()
         waitFor { state.settings.value.preferences.theme == ThemePreset.WINDOWS_98_NOCTORIUM }

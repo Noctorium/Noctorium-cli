@@ -92,7 +92,11 @@ class WebPlayer(
     private val player: SwitchingEngine,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val wire = Wire(state, player)
+
+    /** The playing cover's colour, looked for from the first start: see [CoverColour]. */
+    @Volatile
+    private var cover: CoverColour? = null
+    private val wire = Wire(state, player) { cover?.colour?.value }
     private val proxy = AudioProxy(player.browser, parts.backend)
     private val commands = WebCommands(state, player, scope, checkForUpdates = ::checkForUpdates) { notice(it) }
     private val connections = ConcurrentHashMap.newKeySet<Connection>()
@@ -199,6 +203,8 @@ class WebPlayer(
         state.likes.marks("likes")
         state.lyrics.marks("lyrics")
         state.settings.marks("settings")
+        // The accent and the light in the cover's colour are the settings' part too, and change with the song.
+        CoverColour(state, scope).also { cover = it }.colour.marks("settings")
         state.downloadState.marks("downloads")
         state.connect.marks("connect")
         // The connect part says whether Connect is switched on, which is a setting: switched off where it was not

@@ -263,7 +263,9 @@ object NowPlaying {
         val plain = if (setting == null) wrap(words, w) else emptyList()
         val focusH = setting?.height ?: plain.size
         val focusTop = y + (h - focusH) / 2
-        val colour = if (focus == sung) p.accent else p.text
+        // The line being sung in the accent, and one the wheel moved to in the writing's colour -- or, where the two
+        // are the one white, in the subtext's, so that a line scrolled to is not taken for the one being sung.
+        val colour = if (focus == sung) p.accent else if (p.accentIsWriting) p.subtext else p.text
         if (setting != null) {
             var row = focusTop
             setting.lines.forEach { line ->

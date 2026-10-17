@@ -4,6 +4,8 @@ import app.noctorium.settings.AccentPreset
 import app.noctorium.settings.NoctoriumPreferences
 import app.noctorium.settings.ThemeSkin
 import app.noctorium.settings.Windows98Palette
+import app.noctorium.settings.contrastRatio
+import app.noctorium.settings.onAccent
 import app.noctorium.settings.resolvedAccent
 import app.noctorium.settings.themeColours
 import app.noctorium.settings.themeSkin
@@ -12,16 +14,20 @@ import app.noctorium.settings.windows98Palette
 /**
  * The theme, in terminal colours.
  *
- * The same twenty themes the desktop and the phone have, with the same numbers -- Catppuccin is
- * Catppuccin in a terminal too, and Windows 98 is still grey -- and the same accent choice, including
- * "Match the artwork", which here follows the cover drawn in the player bar. [ownBackground] leaves the page
- * the terminal's own colour, for anybody whose terminal has a background they chose on purpose.
+ * The same themes the desktop and the phone have, with the same numbers -- Catppuccin is Catppuccin in a
+ * terminal too, and Windows 98 is still grey -- and the same accent choice, including "Match the artwork",
+ * which here follows the cover drawn in the player bar. [ownBackground] leaves the page the terminal's own
+ * colour, for anybody whose terminal has a background they chose on purpose.
  *
  * The Windows themes are drawn as themselves as well, by their [skin]: see [Skin]. Their page is always their
  * own grey, violet or beige, whatever [ownBackground] says: everything a skin draws is a slab of that colour --
  * a window's face, a title bar, a taskbar -- with its own writing on it, which a terminal's own background
  * would swallow or show up as a hole in the slab. 98's are drawn from [windows98]: its own grey, or Noctorium
  * 98's night.
+ *
+ * The Glow themes are their colours and nothing more: a terminal has no way to draw a light, so their page is
+ * simply their black. Three of them have a white accent, the writing's own colour, and what is picked out by
+ * the accent alone has to be picked out some other way there: see [accentIsWriting].
  */
 data class Palette(
     val page: Rgb,
@@ -43,8 +49,29 @@ data class Palette(
 
     val faint: Rgb get() = mix(subtext, page.takeIf { it != DEFAULT } ?: if (light) 0xFFFFFF else 0, .45f)
     val line: Rgb get() = mix(subtext, panel.takeIf { it != DEFAULT } ?: if (light) 0xFFFFFF else 0, .62f)
-    val selection: Rgb get() = mix(panel.takeIf { it != DEFAULT } ?: if (light) 0xFFFFFF else 0, accent, if (light) .18f else .26f)
-    val onAccent: Rgb get() = if (luminance(accent) > .55f) 0x111111 else 0xFFFFFF
+    /**
+     * The bar a chosen row lies on: the panel tinted with the accent. A white accent tints it grey, and tinted as
+     * far as a coloured one tints it that grey comes so near the subtext's that an artist cannot be read on it; so
+     * half as far.
+     */
+    val selection: Rgb get() = mix(panel.takeIf { it != DEFAULT } ?: if (light) 0xFFFFFF else 0, accent, if (light) .18f else if (accentIsWriting) .12f else .26f)
+
+    /**
+     * Whether the accent is the writing's own colour, or too near it to be told apart: the white of Afterglow,
+     * Velvet and Smoke. Whatever is told apart only by being in the accent rather than the writing's colour has to
+     * be told apart some other way then: by the selection's bar, a mark, the rest being dimmed.
+     */
+    val accentIsWriting: Boolean get() = !light && contrastRatio(argb(accent), argb(text)) < 1.25
+
+    /**
+     * Writing on the accent, as every Noctorium writes it: core's [onAccent], dark on a bright accent -- the accent
+     * taken most of the way to black -- and white on a deep one. Except where that white would read at under 3:1,
+     * the least anything may: on Noctorium's own violet, where this terminal always wrote dark, it still does.
+     */
+    val onAccent: Rgb get() {
+        val core = rgb(onAccent(argb(accent)))
+        return if (core == 0xFFFFFF && contrastRatio(0xFFFFFFFF, argb(accent)) < 3.0) mix(accent, 0, .84f) else core
+    }
     val youTube: Rgb get() = 0xFF4E45
     val soundCloud: Rgb get() = 0xFF7A1A
     val spotify: Rgb get() = 0x1ED760
@@ -60,9 +87,12 @@ data class Palette(
     val bad: Rgb get() = if (light) 0xC62828 else 0xFF6B6B
 
     companion object {
+        /** Core's colours are opaque ARGB, and a terminal's plain RGB. */
+        private fun rgb(argb: Long): Rgb = (argb and 0xFFFFFF).toInt()
+        private fun argb(rgb: Rgb): Long = 0xFF000000L or (rgb.toLong() and 0xFFFFFF)
+
         fun from(preferences: NoctoriumPreferences, artworkAccent: Rgb?, ownBackground: Boolean): Palette {
             val colours = preferences.themeColours()
-            fun rgb(argb: Long) = (argb and 0xFFFFFF).toInt()
             val accent = if (preferences.accent == AccentPreset.ARTWORK && artworkAccent != null) {
                 artworkAccent
             } else {

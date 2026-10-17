@@ -450,6 +450,99 @@ class TuiRenderCheck {
     }
 
     /**
+     * The Glow themes -- Afterglow, Cinder, Velvet and Smoke -- and Night beside them: Home, the queue with a row
+     * chosen, Now playing in its layouts, Toolbar 2, Settings with the theme picker open, its search for "glow", and
+     * every seek bar. A terminal draws none of their light; these are for what is chosen still showing where the
+     * accent is white. Over made-up songs with made-up lyrics and Bandcamp's stand-in for the only service, so it
+     * needs no network and no account.
+     */
+    @Test
+    fun `the Glow themes draw`() {
+        val folder = folder ?: return
+        folder.mkdirs()
+        val parts = CliParts()
+        val player = StandIn()
+        val state = app.noctorium.cli.BandcampStandIn.state(parts, player)
+        val tui = Tui(state, parts, web = null)
+        val artist = Artist("lanterns", "The Paper Lanterns", ProviderType.BANDCAMP)
+        val songs = listOf("Harbour Lights" to 249_000L, "Salt and Static" to 203_000L, "Night Ferry" to 187_000L, "Lamps on the Water" to 221_000L).mapIndexed { i, (title, ms) ->
+            Track(provider = ProviderType.BANDCAMP, id = "90$i", title = title, artists = listOf(artist), durationMs = ms, sourceUrl = "https://example.invalid/track/$i")
+        }
+        val themes = listOf(
+            ThemePreset.AFTERGLOW to "afterglow",
+            ThemePreset.CINDER to "cinder",
+            ThemePreset.VELVET to "velvet",
+            ThemePreset.SMOKE to "smoke",
+            ThemePreset.NOCTORIUM_NIGHT to "night",
+        )
+        try {
+            state.setAutoplay(false)
+            app.noctorium.cli.LyricsStandIn.set(state, songs.first())
+            state.play(songs.first(), PlaybackOrigin.SEARCH, songs)
+            waitFor(10_000) { state.playback.value.track != null }
+            player.frames.value = AudioAnalysis(bands = List(10) { band -> (.8f - band * .05f) }, peaks = listOf(.9f, .85f), rms = listOf(.6f, .55f))
+            for ((theme, name) in themes) {
+                state.setTheme(theme)
+                waitFor(5_000) { state.settings.value.preferences.theme == theme }
+                state.setProgressBarStyle(ProgressBarStyle.SLIDER)
+                tui.page = Page.HOME
+                write(folder, "glow-home-$name", tui)
+                tui.page = Page.QUEUE
+                tui.press(Input.Key(Keys.DOWN))
+                write(folder, "glow-queue-$name", tui)
+                tui.page = Page.NOW_PLAYING
+                for (layout in listOf(TuiNowPlaying.CLASSIC, TuiNowPlaying.LYRICS, TuiNowPlaying.PLAYLIST)) {
+                    tui.preferences.nowPlaying = layout
+                    write(folder, "glow-now-playing-${layout.name.lowercase()}-$name", tui)
+                }
+                PlaylistLayout.shown = PlaylistLayout.Tab.LYRICS
+                write(folder, "glow-now-playing-playlist-lyrics-$name", tui)
+                PlaylistLayout.shown = PlaylistLayout.Tab.QUEUE
+                tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
+                tui.preferences.playerBar = TuiPlayerBar.TOOLBAR_2
+                tui.page = Page.QUEUE
+                write(folder, "glow-toolbar2-$name", tui)
+                tui.preferences.playerBar = TuiPlayerBar.FULL
+                tui.page = Page.SETTINGS
+                SettingsIndex.jump(tui, "theme")
+                write(folder, "glow-settings-$name", tui)
+                Settings.rows(tui).filterIsInstance<Row.Action>().first { it.label == "Theme" }.run()
+                write(folder, "glow-picker-$name", tui)
+                tui.overlays.clear()
+                tui.settingsQuery = "glow"
+                tui.settingsSearchFocused = true
+                write(folder, "glow-settings-search-$name", tui)
+                SettingsIndex.close(tui)
+            }
+
+            // Every seek bar in each of them, with the rows round it free and hemmed in.
+            val styles = ProgressBarStyle.entries
+            val columnW = 37
+            val canvas = Canvas(themes.size * columnW + 1, styles.size * 4 + 2)
+            canvas.clear(0x202020, 0xDDDDDD)
+            themes.forEachIndexed { t, (theme, _) ->
+                val p = Palette.from(NoctoriumPreferences(theme = theme), null, false)
+                val x = t * columnW
+                canvas.fill(x, 0, columnW, canvas.height, p.page)
+                canvas.write(x + 1, 0, Settings.themeName(theme), p.text, p.page, BOLD)
+                styles.forEachIndexed { s, style ->
+                    val y = 2 + s * 4
+                    canvas.write(x + 1, y, style.displayName, p.subtext, p.page)
+                    SeekBars.draw(canvas, p, style, x + 1, y + 2, 16, 94_000f / 249_000, true, p.page, "yt:abc", 249_000, roomAbove = true, roomBelow = true)
+                    SeekBars.draw(canvas, p, style, x + 19, y + 1, 16, 94_000f / 249_000, true, p.page, "yt:abc", 249_000)
+                }
+            }
+            Frames.write(folder, "glow-seek-bars", canvas)
+        } finally {
+            PlaylistLayout.shown = PlaylistLayout.Tab.QUEUE
+            tui.preferences.nowPlaying = TuiNowPlaying.CLASSIC
+            tui.preferences.playerBar = TuiPlayerBar.FULL
+            state.setTheme(ThemePreset.NOCTORIUM_NIGHT)
+            state.close()
+        }
+    }
+
+    /**
      * Devices with Noctorium Connect on and off, the same switch in Settings and found by its search, and the Playlist
      * layout's Lyrics tab -- playing, scrolled, and with nothing playing -- in a dark theme, a light one and the three
      * Windows ones, wide and narrow. Over made-up songs with made-up lyrics and Bandcamp's stand-in for the only

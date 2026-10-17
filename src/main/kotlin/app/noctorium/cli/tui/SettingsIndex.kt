@@ -35,7 +35,12 @@ object SettingsIndex {
         entry("listenbrainz", "ListenBrainz", Settings.YOU, "Scrobbles what you play to ListenBrainz.", "scrobble", "scrobbling", "token"),
         entry("discord", "Discord shows what is playing", Settings.YOU, "Your Discord status shows the song.", "rich presence", "status", "activity"),
 
-        entry("theme", "Theme", Settings.LOOK, "The colours, and the Windows themes drawn as themselves.", "dark mode", "light mode", "colours", "colors", "skin", "windows 98", "windows xp"),
+        entry(
+            "theme", "Theme", Settings.LOOK, "The colours, and the Windows themes drawn as themselves.",
+            "dark mode", "light mode", "colours", "colors", "skin", "windows 98", "windows xp",
+            // The Glow themes, by their family's name and their own, and by what they are: black.
+            "glow", "afterglow", "cinder", "velvet", "smoke", "black",
+        ),
         entry("accent", "Accent", Settings.LOOK, "The colour that picks things out, or one from the cover.", "colour", "color", "highlight", "tint"),
         entry("glyphs", "Symbols", Settings.LOOK, "The buttons' and pages' symbols: the standard ones, plain ASCII, or a Nerd Font's icons.", "icons", "icon set", "glyphs", "nerd font", "ascii", "emoji"),
         entry("playerBar", "Player bar", Settings.LOOK, "How the bar along the foot is laid out: full, compact, a taskbar, or a toolbar as it was or Toolbar 2.", "controls", "toolbar", "toolbar 2", "taskbar", "compact", "footer"),

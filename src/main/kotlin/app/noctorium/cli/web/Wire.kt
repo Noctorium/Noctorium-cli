@@ -19,6 +19,7 @@ import app.noctorium.playback.SleepTimerState
 import app.noctorium.playback.VolumeBoost
 import app.noctorium.playlists.LocalPlaylist
 import app.noctorium.settings.AutoplaySource
+import app.noctorium.settings.GlowShape
 import app.noctorium.settings.HYBRID_SEARCH_SERVICES
 import app.noctorium.settings.HomePlay
 import app.noctorium.settings.IconSet
@@ -27,10 +28,12 @@ import app.noctorium.settings.QueueColumn
 import app.noctorium.settings.ScrobbleServiceState
 import app.noctorium.settings.ServiceBadgeStyle
 import app.noctorium.settings.SpotifyDataImportState
+import app.noctorium.settings.ThemeGlow
 import app.noctorium.settings.ThemePreset
 import app.noctorium.settings.ThemeSkin
 import app.noctorium.settings.VisualiserStyle
 import app.noctorium.settings.Windows98Palette
+import app.noctorium.settings.onAccent
 import app.noctorium.settings.resolvedAccent
 import app.noctorium.settings.themeColours
 import app.noctorium.settings.windows98Palette
@@ -483,6 +486,44 @@ data class WTheme(
      * Absent for every other skin.
      */
     val windows98: WWindows98? = null,
+    /**
+     * The colour of writing on [accent], as core's onAccent has it: near-black on the Glow themes' white, white on
+     * a deep accent. The page's --on-accent, the same colour every Noctorium writes there.
+     */
+    val onAccent: String? = null,
+    /** The light the Glow themes lay across their page, under everything on it; absent for every other theme. */
+    val glow: WGlow? = null,
+)
+
+/**
+ * Core's ThemeGlow, as the page draws it: [colour] laid over the page in each of [shapes], one gradient each, at
+ * [strength] times the shape's own where it is brightest and fading through core's falloff to nothing. In the theme
+ * in force, [colour] is the light for the song playing -- the cover's, for Afterglow -- and in the list of themes
+ * each one's own, which is what it falls back to.
+ */
+@Serializable
+data class WGlow(
+    val colour: String,
+    val followsArtwork: Boolean,
+    /** GlowPlacement's name: ARTWORK or TOP. The shapes are what is drawn; the name is for saying so. */
+    val placement: String,
+    val strength: Float,
+    val shapes: List<WGlowShape>,
+)
+
+/**
+ * One of a glow's gradients. A "pool" is a circle centred [x] and [y] of the page's width and height from its top
+ * left, reaching [radius] of its longer side; a "band" runs across the whole width from the top to [depth] of the
+ * way down.
+ */
+@Serializable
+data class WGlowShape(
+    val kind: String,
+    val strength: Float,
+    val x: Float? = null,
+    val y: Float? = null,
+    val radius: Float? = null,
+    val depth: Float? = null,
 )
 
 /** A [Windows98Palette]: the colours of every bevel, title bar, list and desktop the 98 skin draws, as "#rrggbb". */
@@ -627,13 +668,29 @@ data class WNotice(val text: String, val tone: String = "normal", val url: Strin
 
 private fun argb(value: Long) = "#%06x".format(value and 0xFFFFFF)
 
-private fun ThemePreset.wire(custom: app.noctorium.settings.ThemeColours): WTheme {
+/**
+ * A theme for the page, with [accent] for its accent -- the one in force, for the theme in force -- and its light,
+ * if it has one, in the colour it takes from [artwork], the playing cover's colour as core's ArtworkColour finds it.
+ */
+private fun ThemePreset.wire(custom: app.noctorium.settings.ThemeColours, accent: Long = (colours ?: custom).accent, artwork: Long? = null): WTheme {
     val c = colours ?: custom
     return WTheme(
-        name, displayName, family, argb(c.background), argb(c.panel), argb(c.card), argb(c.text), argb(c.subtext), argb(c.accent), c.light, skin.name,
+        name, displayName, family, argb(c.background), argb(c.panel), argb(c.card), argb(c.text), argb(c.subtext), argb(accent), c.light, skin.name,
         windows98 = windows98Palette.wire().takeIf { skin == ThemeSkin.WINDOWS_98 },
+        onAccent = argb(onAccent(accent)),
+        glow = glow?.wire(artwork),
     )
 }
+
+private fun ThemeGlow.wire(artwork: Long?) = WGlow(
+    argb(resolvedColour(artwork)), followsArtwork, placement.name, strength,
+    placement.shapes.map { shape ->
+        when (shape) {
+            is GlowShape.Pool -> WGlowShape("pool", shape.strength, x = shape.x, y = shape.y, radius = shape.radius)
+            is GlowShape.Band -> WGlowShape("band", shape.strength, depth = shape.depth)
+        }
+    },
+)
 
 private fun Windows98Palette.wire() = WWindows98(
     argb(face), argb(highlight), argb(light), argb(shadow), argb(darkShadow), argb(window), argb(text), argb(greyText),
@@ -641,8 +698,11 @@ private fun Windows98Palette.wire() = WWindows98(
     argb(titleText), argb(tooltip), argb(desktop), dark,
 )
 
-/** The parts of the state, each as JSON, by the name the page knows them by. */
-class Wire(private val state: AppState, private val engine: SwitchingEngine) {
+/**
+ * The parts of the state, each as JSON, by the name the page knows them by. [artwork] is the playing cover's colour,
+ * as a [CoverColour] finds it, or null for none -- and always none for a Wire not given one.
+ */
+class Wire(private val state: AppState, private val engine: SwitchingEngine, private val artwork: () -> Long? = { null }) {
     fun playback(): JsonElement {
         val p = state.playback.value
         val sleep = when (val timer = state.sleepTimer.value) {
@@ -758,7 +818,9 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine) {
         val s = state.settings.value
         val p = s.preferences
         val colours = p.themeColours()
-        val current = ThemePreset.entries.first { it == p.theme }.wire(p.customTheme).copy(accent = argb(p.resolvedAccent(null)))
+        // The accent in force, the cover's for "Match the artwork", and the light in the cover's colour for Afterglow.
+        val artwork = artwork()
+        val current = p.theme.wire(p.customTheme, accent = p.resolvedAccent(artwork), artwork = artwork)
         return wireJson.encodeToJsonElement(
             WSettings(
                 theme = p.theme.name,
