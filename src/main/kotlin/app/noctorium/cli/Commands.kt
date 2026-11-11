@@ -1294,5 +1294,7 @@ class Out(private val colour: Boolean = System.console() != null && System.geten
         // Tidal's own colour is black, which a dark terminal would swallow: its letters in the terminal's own colour.
         ProviderType.TIDAL -> wrap("1", "TD")
         ProviderType.LOCAL -> "··"
+        // A radio station, in core's own colour for them.
+        ProviderType.RADIO -> wrap("1;38;2;15;138;126", "FM")
     }
 }

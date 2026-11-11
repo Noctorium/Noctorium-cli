@@ -122,7 +122,7 @@ fun ProviderType.badge(): String = when (this) {
     ProviderType.SPOTIFY -> "SP"
     ProviderType.BANDCAMP -> "BC"
     ProviderType.VK -> "VK"
-    ProviderType.APPLE_MUSIC, ProviderType.DEEZER, ProviderType.TIDAL -> ServiceMarks.letters(this)
+    ProviderType.APPLE_MUSIC, ProviderType.DEEZER, ProviderType.TIDAL, ProviderType.RADIO -> ServiceMarks.letters(this)
     ProviderType.LOCAL -> "··"
 }
 
@@ -135,7 +135,7 @@ fun ProviderType.badge(): String = when (this) {
 val ProviderType.keepsLikes: Boolean
     get() = when (this) {
         ProviderType.YOUTUBE_MUSIC, ProviderType.YOUTUBE_VIDEO, ProviderType.SOUNDCLOUD, ProviderType.SPOTIFY, ProviderType.VK -> true
-        ProviderType.BANDCAMP, ProviderType.APPLE_MUSIC, ProviderType.DEEZER, ProviderType.TIDAL, ProviderType.LOCAL -> false
+        ProviderType.BANDCAMP, ProviderType.APPLE_MUSIC, ProviderType.DEEZER, ProviderType.TIDAL, ProviderType.LOCAL, ProviderType.RADIO -> false
     }
 
 /**
@@ -162,7 +162,7 @@ val Playlist.kind: ListKind
 val ProviderType.opensReleases: Boolean
     get() = when (this) {
         ProviderType.BANDCAMP, ProviderType.SPOTIFY, ProviderType.APPLE_MUSIC, ProviderType.DEEZER, ProviderType.TIDAL -> true
-        ProviderType.YOUTUBE_MUSIC, ProviderType.YOUTUBE_VIDEO, ProviderType.SOUNDCLOUD, ProviderType.VK, ProviderType.LOCAL -> false
+        ProviderType.YOUTUBE_MUSIC, ProviderType.YOUTUBE_VIDEO, ProviderType.SOUNDCLOUD, ProviderType.VK, ProviderType.LOCAL, ProviderType.RADIO -> false
     }
 
 fun Palette.badgeColour(provider: ProviderType): Rgb = when (provider) {
@@ -174,7 +174,7 @@ fun Palette.badgeColour(provider: ProviderType): Rgb = when (provider) {
     ProviderType.APPLE_MUSIC -> appleMusic
     ProviderType.DEEZER -> deezer
     ProviderType.TIDAL -> tidal
-    ProviderType.LOCAL -> subtext
+    ProviderType.LOCAL, ProviderType.RADIO -> subtext
 }
 
 fun formatTime(ms: Long?): String {

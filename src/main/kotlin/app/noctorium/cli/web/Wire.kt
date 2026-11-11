@@ -1021,4 +1021,5 @@ fun likeKeyOf(provider: ProviderType, id: String) = when (provider) {
     ProviderType.DEEZER -> "dz:$id"
     ProviderType.TIDAL -> "td:$id"
     ProviderType.LOCAL -> "local:$id"
+    ProviderType.RADIO -> "radio:$id"
 }
