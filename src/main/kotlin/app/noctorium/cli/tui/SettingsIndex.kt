@@ -65,6 +65,7 @@ object SettingsIndex {
         entry("keepQueue", "Keep the queue between launches", Settings.LISTENING, "The queue is back where it was left.", "resume", "restore", "remember", "session"),
         entry("sleepFade", "Sleep timer fades out", Settings.LISTENING, "The sleep timer lowers the volume before it stops.", "sleep timer", "fade", "bedtime"),
         entry("hybridSearch", "Hybrid search asks", Settings.LISTENING, "Which services a search of all of them asks.", "search", "services", "all"),
+        entry("playLinksFromSearch", "Play links pasted into Search at once", Settings.LISTENING, "A music link pasted into the search box plays at once, with no Link page.", "paste", "link", "url"),
         entry("skipNonMusic", "Skip what is not the music in YouTube videos", Settings.LISTENING, "Skips intros and talking in music videos.", "sponsorblock", "intro", "skip"),
         entry("youtubeHistory", "Add what is played here to YouTube history", Settings.LISTENING, "Songs played here show in YouTube's history.", "watch history", "history"),
         entry("lyrics", "Lyrics from", Settings.LISTENING, "Which source's lyrics are shown first.", "lyrics", "words", "karaoke", "synced"),

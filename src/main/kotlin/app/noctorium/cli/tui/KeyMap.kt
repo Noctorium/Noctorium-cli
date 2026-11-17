@@ -70,6 +70,8 @@ enum class KeyAction(val label: String, val scope: KeyScope, val defaults: List<
     SAVE_MP3("Save as an MP3", KeyScope.TRACK, "e"),
     COPY_LINK("Copy its link", KeyScope.TRACK, "c"),
     OPEN_PAGE("Open it in the browser", KeyScope.TRACK, "o"),
+    /** The artist's page on the song's own service, as their songs, in the library. */
+    GO_TO_ARTIST("Go to the artist", KeyScope.TRACK, "g"),
     PIN("Pin to Home, or unpin", KeyScope.TRACK, "i"),
     REMOVE("Take it out of the queue or playlist", KeyScope.TRACK, "x"),
     MOVE_DOWN("Move it down", KeyScope.TRACK, "J"),

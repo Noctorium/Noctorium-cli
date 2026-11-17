@@ -331,6 +331,7 @@ object Settings {
                 id = "hybridSearch",
             ),
         )
+        add(Row.Action("Play links pasted into Search at once", value = onOff(preferences.playLinksFromSearch), step = { state.setPlayLinksFromSearch(!preferences.playLinksFromSearch) }, id = "playLinksFromSearch"))
         add(Row.Action("Skip what is not the music in YouTube videos", value = onOff(preferences.skipNonMusic), step = { state.setSkipNonMusic(!preferences.skipNonMusic) }, id = "skipNonMusic"))
         add(Row.Action("Add what is played here to YouTube history", value = onOff(preferences.youtubeHistory), step = { state.setYouTubeHistory(!preferences.youtubeHistory) }, id = "youtubeHistory"))
         val sources = listOf<LyricsProviderId?>(null) + LyricsProviderId.entries

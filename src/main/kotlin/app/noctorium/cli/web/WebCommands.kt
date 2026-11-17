@@ -138,6 +138,22 @@ class WebCommands(
             // --- The library ---
             "refreshLibrary" -> state.refreshLibrary(command.bool("force") ?: false)
             "openPlaylist" -> state.openPlaylist(playlist(command.string("key")) ?: return "No such playlist")
+            // An artist's page, opened as a playlist under the key the page goes to: "<service>:artist-named:<name>".
+            "openArtist" -> {
+                val provider = command.string("provider")?.let { name -> ProviderType.entries.firstOrNull { it.name == name } } ?: return "Which service?"
+                val name = command.string("name")?.trim()?.takeIf(String::isNotEmpty) ?: return "Whose page?"
+                val from = command.string("sourceUrl")?.takeIf(String::isNotBlank)
+                val profile = if (provider == ProviderType.SOUNDCLOUD) from?.let { app.noctorium.domain.soundCloudProfileOf(it) } else null
+                state.openPlaylist(
+                    Playlist(
+                        id = "${app.noctorium.domain.ARTIST_NAMED}$name",
+                        title = name,
+                        provider = provider,
+                        ownerName = provider.displayName,
+                        sourceUrl = profile?.let { "$it/tracks" },
+                    ),
+                )
+            }
             "closePlaylist" -> state.closePlaylist()
             "openLocal" -> state.openLocalPlaylist(state.library.value.localPlaylists.firstOrNull { it.id == command.string("id") } ?: return "No such playlist")
             "closeLocal" -> state.closeLocalPlaylist()
@@ -243,6 +259,7 @@ class WebCommands(
             "timeDisplay" -> state.setTimeDisplay(TimeDisplay.valueOf(command.string("name") ?: return "No choice"))
             "skipNonMusic" -> state.setSkipNonMusic(command.bool("on") ?: return "On or off?")
             "youtubeHistory" -> state.setYouTubeHistory(command.bool("on") ?: return "On or off?")
+            "playLinksFromSearch" -> state.setPlayLinksFromSearch(command.bool("on") ?: return "On or off?")
             "discord" -> state.setDiscordPresence(command.bool("on") ?: return "On or off?")
             "animations" -> state.setAnimations(command.bool("on") ?: return "On or off?")
             "exportFolder" -> state.setExportFolder(command.string("path") ?: return "No folder")

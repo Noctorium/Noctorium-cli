@@ -474,6 +474,7 @@ object NowPlaying {
             KeyAction.OPEN_PAGE -> lyrics.outcomes.firstOrNull { it.provider == lyrics.selectedProvider }?.result?.sourceUrl?.let(state::openExternalUrl)
                 ?: state.openExternalUrl(track.pageUrl)
             KeyAction.COPY_LINK -> state.copyTrackLink(track)
+            KeyAction.GO_TO_ARTIST -> Tracks.goToArtist(tui, track)
             KeyAction.DOWNLOAD -> if (!state.canKeep(track)) Tracks.notKept(tui, track) else { state.downloadTrack(track); tui.toast("Downloading ${track.title}…") }
             KeyAction.ADD_TO_PLAYLIST -> tui.overlays.addLast(Tracks.addToPlaylist(tui, track))
             KeyAction.LYRICS_AGAIN -> { state.loadLyrics(track, forceRefresh = true); tui.toast("Asking every source again…") }

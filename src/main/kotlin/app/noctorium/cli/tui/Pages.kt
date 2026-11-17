@@ -234,7 +234,7 @@ object Pages {
             add(Row.Header("Artists"))
             openableArtists.forEach { add(Row.PlaylistItem(it)) }
             artists.forEach { artist ->
-                add(Row.Action(artist.name, hint = artist.provider.displayName, run = { search(tui, artist.name) }))
+                add(Row.Action(artist.name, hint = artist.provider.displayName, run = { openArtist(tui, artist) }))
             }
         }
         // With a bang, the words without it, and where they were looked for.
@@ -244,6 +244,13 @@ object Pages {
             add(Row.Note(if (words.isBlank()) "Type what to look for$where." else "Nothing found for \"$words\"$where."))
         }
         if (ui.searchLoading && isEmpty()) add(Row.Note("Searching…"))
+    }
+
+    /** An artist found by name, opened in the library as their songs. */
+    private fun openArtist(tui: Tui, artist: app.noctorium.domain.Artist) {
+        tui.page = Page.LIBRARY
+        tui.libraryOpen = true
+        tui.state.openArtist(artist)
     }
 
     private fun search(tui: Tui, query: String) {
@@ -751,6 +758,17 @@ object Pages {
 
 /** What can be done to a track wherever it is listed. */
 object Tracks {
+    /** The artist of [track], opened in the library as their songs, from their page on the song's service. */
+    internal fun goToArtist(tui: Tui, track: app.noctorium.domain.Track) {
+        if (track.artistLine.isBlank() || track.provider == ProviderType.RADIO || track.provider == ProviderType.LOCAL) {
+            tui.toast("No artist to open", Row.Tone.WARN)
+            return
+        }
+        tui.page = Page.LIBRARY
+        tui.libraryOpen = true
+        tui.state.openArtistOf(track)
+    }
+
     fun play(tui: Tui, row: Row.Song) {
         val state = tui.state
         when {
@@ -795,6 +813,7 @@ object Tracks {
             }
             KeyAction.COPY_LINK -> state.copyTrackLink(track)
             KeyAction.OPEN_PAGE -> state.openExternalUrl(track.pageUrl)
+            KeyAction.GO_TO_ARTIST -> goToArtist(tui, track)
             KeyAction.PIN -> { val pinned = state.isPinned(track); state.togglePin(track); tui.toast(if (pinned) "Unpinned from Home" else "Pinned to Home") }
             KeyAction.ADD_TO_PLAYLIST -> tui.overlays.addLast(addToPlaylist(tui, track))
             KeyAction.REMOVE -> remove(tui, row)

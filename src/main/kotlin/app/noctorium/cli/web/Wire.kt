@@ -565,6 +565,8 @@ data class WSettings(
     val timeDisplay: String,
     val skipNonMusic: Boolean,
     val youtubeHistory: Boolean,
+    /** A music link pasted into the search box plays at once, with no Enter. */
+    val playLinksFromSearch: Boolean = false,
     val lyricsProvider: String? = null,
     val discord: Boolean,
     val animations: Boolean,
@@ -834,6 +836,7 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine, pri
                 timeDisplay = p.timeDisplay.name,
                 skipNonMusic = p.skipNonMusic,
                 youtubeHistory = p.youtubeHistory,
+                playLinksFromSearch = p.playLinksFromSearch,
                 lyricsProvider = p.lyricsProvider?.name,
                 discord = p.discord.enabled,
                 animations = p.animations,
