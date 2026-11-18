@@ -4,6 +4,7 @@ import app.noctorium.cli.AutoplayState
 import app.noctorium.core.LinkState
 import app.noctorium.core.LinkStatus
 import app.noctorium.core.SearchMode
+import app.noctorium.domain.isLikedCollection
 import app.noctorium.domain.PlaybackOrigin
 import app.noctorium.domain.Playlist
 import app.noctorium.domain.ProviderType
@@ -187,6 +188,19 @@ object Pages {
     private fun searchRows(tui: Tui): List<Row> = buildList {
         val ui = tui.state.ui.value
         val results = ui.searchResults
+        // What the search looks for: songs and everything else, artists, or playlists. Left and right change it.
+        val kinds = listOf(app.noctorium.core.SearchKind.MUSIC, app.noctorium.core.SearchKind.ARTISTS, app.noctorium.core.SearchKind.PLAYLISTS)
+        add(
+            Row.Action(
+                "Looking for",
+                value = ui.searchKind.displayName,
+                detail = "← → for Music, Artists or Playlists",
+                step = { by ->
+                    val at = kinds.indexOf(ui.searchKind).coerceAtLeast(0)
+                    tui.state.setSearchKind(kinds[(at + by).mod(kinds.size)])
+                },
+            ),
+        )
         // A link pasted into the box is opened rather than searched for, and what it opened is said above anything found.
         addAll(pastedLinkRows(tui, tui.pastedLink()))
         if (ui.searchQuery.isBlank()) {
@@ -306,7 +320,14 @@ object Pages {
             add(Row.Note("Noctorium needs your SoundCloud profile name to find your playlists: Settings → SoundCloud.", Row.Tone.WARN))
         }
         library.errorMessage?.let { add(Row.Note(it, Row.Tone.BAD)) }
-        val byService = library.playlists.groupBy { it.provider }
+        // Each service's liked songs first: what is opened most, found first.
+        val liked = library.playlists.filter { it.isLikedCollection() }
+        if (liked.isNotEmpty()) {
+            add(Row.Header("Liked", "${liked.size}"))
+            liked.forEach { add(Row.PlaylistItem(it)) }
+            add(Row.Gap)
+        }
+        val byService = library.playlists.filterNot { it.isLikedCollection() }.groupBy { it.provider }
         // Bandcamp's are a fan's collection, a playlist for each release, and their wishlist; VK's, My music
         // and then the account's playlists; Deezer's, a public profile's playlists, loved tracks and albums.
         listOf(

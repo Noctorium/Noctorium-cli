@@ -131,6 +131,7 @@ class WebCommands(
             // --- Finding ---
             "search" -> state.search(command.string("query").orEmpty())
             "searchMode" -> state.setSearchMode(SearchMode.valueOf(command.string("mode") ?: return "No mode"))
+            "searchKind" -> state.setSearchKind(choice<app.noctorium.core.SearchKind>(command.string("kind")) ?: return "No such kind")
             "refreshHome" -> state.refreshHome()
             "filter" -> state.setFilter(ProviderFilter.valueOf(command.string("filter")?.uppercase() ?: "ALL"))
             "pin" -> state.togglePin(command.track("track") ?: return "No track")
@@ -255,6 +256,7 @@ class WebCommands(
             "statusBar" -> state.setStatusBar(command.bool("on") ?: return "On or off?")
             "iconSet" -> state.setIconSet(choice<IconSet>(command.string("name")) ?: return "No such icons")
             "homePlay" -> state.setHomePlay(choice<HomePlay>(command.string("name")) ?: return "No such choice")
+            "homeLayout" -> state.setHomeLayout(choice<app.noctorium.settings.HomeLayout>(command.string("name")) ?: return "No such layout")
             "serviceBadgeStyle" -> state.setServiceBadgeStyle(choice<ServiceBadgeStyle>(command.string("name")) ?: return "No such badges")
             "timeDisplay" -> state.setTimeDisplay(TimeDisplay.valueOf(command.string("name") ?: return "No choice"))
             "skipNonMusic" -> state.setSkipNonMusic(command.bool("on") ?: return "On or off?")
@@ -459,6 +461,8 @@ class WebCommands(
         val library = state.library.value
         library.openPlaylist?.takeIf { it.playlistKey == key }?.let { return it }
         library.playlists.firstOrNull { it.playlistKey == key }?.let { return it }
+        // An album or a playlist on the open artist's page.
+        library.openArtist?.sections?.asSequence()?.flatMap { it.playlists }?.firstOrNull { it.playlistKey == key }?.let { return it }
         val ui = state.ui.value
         ui.searchResults.playlists.firstOrNull { it.playlistKey == key }?.let { return it }
         return ui.homeSections.asSequence().flatMap { it.playlists }.firstOrNull { it.playlistKey == key }

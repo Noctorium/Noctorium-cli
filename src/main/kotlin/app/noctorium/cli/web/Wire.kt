@@ -205,6 +205,28 @@ data class WSearch(
     val searchBang: String? = null,
     /** Where the results shown are from, by SearchMode's name: the bang's service, or [mode] without one. */
     val activeSearchMode: String = mode,
+    /** What the search looks for, by SearchKind's name: MUSIC, RADIO, ARTISTS or PLAYLISTS. */
+    val kind: String = "MUSIC",
+)
+
+/** A row of an artist's page: Albums, Singles & EPs, Playlists, as the service has them. */
+@Serializable
+data class WArtistRow(val title: String, val playlists: List<WPlaylist>)
+
+/** What an artist's page shows besides their songs: their pictures, their line, followers and rows of albums. */
+@Serializable
+data class WArtistPage(
+    val name: String,
+    val provider: ProviderType,
+    val picture: String? = null,
+    val banner: String? = null,
+    val about: String? = null,
+    /** "7.22M followers". */
+    val followers: String? = null,
+    val pageUrl: String? = null,
+    /** How many of the open page's first songs are their most played. */
+    val popular: Int = 0,
+    val rows: List<WArtistRow> = emptyList(),
 )
 
 @Serializable
@@ -220,6 +242,8 @@ data class WLibrary(
     val openLoading: Boolean,
     val openError: String? = null,
     val enriching: Boolean,
+    /** The artist whose page is open, for the page to show as theirs. */
+    val artist: WArtistPage? = null,
 )
 
 @Serializable
@@ -618,6 +642,9 @@ data class WSettings(
     /** What a song played from Home plays after it, by HomePlay's name, and the choices. */
     val homePlay: String = HomePlay.AUTOPLAY.name,
     val homePlays: List<WChoice> = emptyList(),
+    /** How Home is laid out, by HomeLayout's name, and the choices: one so far. */
+    val homeLayout: String = app.noctorium.settings.HomeLayout.CLASSIC.name,
+    val homeLayouts: List<WChoice> = emptyList(),
     /**
      * The services' badges, by ServiceBadgeStyle's name -- MARKS, each service's own, or LETTERS, as they were -- and
      * the choices. The page draws them; the terminal has only letters, and keeps them.
@@ -771,6 +798,7 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine, pri
                 r.tracks.map { it.wire() }, r.playlists.map { it.wire() }, r.albums.map { it.wire() }, r.artists.map { it.wire() },
                 searchBang = ui.searchBang?.typed,
                 activeSearchMode = ui.activeSearchMode.name,
+                kind = ui.searchKind.name,
             ),
         )
     }
@@ -782,6 +810,12 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine, pri
                 l.playlists.map { it.wire() }, l.localPlaylists.map { it.wire() }, l.loading, l.loaded, l.errorMessage,
                 l.needsSoundCloudUsername, l.openPlaylist?.wire(withTracks = true), l.openLocalPlaylist?.wire(),
                 l.openPlaylistLoading, l.openPlaylistError, l.openPlaylistEnriching,
+                l.openArtist?.let { a ->
+                    WArtistPage(
+                        a.name, a.provider, a.picture, a.banner, a.about, a.followersLine, a.pageUrl, a.popular,
+                        a.sections.map { WArtistRow(it.title, it.playlists.map { p -> p.wire() }) },
+                    )
+                },
             ),
         )
     }
@@ -914,6 +948,8 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine, pri
                 iconSets = IconSet.entries.map { WChoice(it.name, it.displayName, it.description) },
                 homePlay = p.homePlay.name,
                 homePlays = HomePlay.entries.map { WChoice(it.name, it.displayName, it.description) },
+                homeLayout = p.homeLayout.name,
+                homeLayouts = app.noctorium.settings.HomeLayout.entries.map { WChoice(it.name, it.displayName, it.description) },
                 serviceBadgeStyle = p.serviceBadgeStyle.name,
                 serviceBadgeStyles = ServiceBadgeStyle.entries.map { WChoice(it.name, it.displayName, it.description) },
                 bandcamp = WBandcamp(

@@ -302,6 +302,15 @@ object Settings {
         )
         add(
             Row.Action(
+                "Home layout",
+                value = preferences.homeLayout.displayName,
+                detail = preferences.homeLayout.description + " More layouts are on their way.",
+                step = { by -> state.setHomeLayout(cycle(app.noctorium.settings.HomeLayout.entries, preferences.homeLayout, by)) },
+                id = "homeLayout",
+            ),
+        )
+        add(
+            Row.Action(
                 "Keep the queue between launches",
                 value = if (preferences.keepQueue) "On: it is back where it was left" else "Off",
                 step = { state.setKeepQueue(!preferences.keepQueue) },
