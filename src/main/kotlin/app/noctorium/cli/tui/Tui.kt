@@ -119,6 +119,9 @@ class Tui(
     /** Whether the playlist list or an open playlist is showing on the library page. */
     internal var libraryOpen = false
 
+    /** Where the first-time setup is, while Home shows it: see Pages.setupRows. */
+    internal var setupStep = app.noctorium.settings.SetupStep.WELCOME
+
     /** What a mouse press on the screen means, filled in as the frame is drawn. */
     internal val clickTargets = mutableListOf<ClickTarget>()
 

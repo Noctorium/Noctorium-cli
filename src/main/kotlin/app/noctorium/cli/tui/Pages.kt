@@ -71,6 +71,7 @@ object Pages {
     }
 
     private fun heading(tui: Tui): String = when (tui.page) {
+        Page.HOME -> if (!tui.state.settings.value.preferences.setupDone) "Welcome" else tui.page.title
         Page.LIBRARY -> openPlaylistTitle(tui) ?: "Your library"
         Page.SETTINGS -> if (tui.keysOpen) "Keys" else tui.page.title
         else -> tui.page.title
@@ -86,7 +87,11 @@ object Pages {
         val state = tui.state
         val k = tui::key
         return when (tui.page) {
-            Page.HOME -> if (state.ui.value.homeLoading) "Loading…" else "From every service"
+            Page.HOME -> when {
+                !state.settings.value.preferences.setupDone -> "First-time setup · skip it any time"
+                state.ui.value.homeLoading -> "Loading…"
+                else -> "From every service"
+            }
             // Where the results are from: the bang's service while one is typed, the page's choice otherwise.
             Page.SEARCH -> if (state.ui.value.searchLoading) "Searching…" else state.ui.value.activeSearchMode.displayName
             Page.LIBRARY -> {
@@ -145,7 +150,8 @@ object Pages {
     }
 
     fun rows(tui: Tui): List<Row> = when (tui.page) {
-        Page.HOME -> homeRows(tui)
+        // A first start: the setup, on Home, until it is finished or skipped. See SetupStep.
+        Page.HOME -> if (!tui.state.settings.value.preferences.setupDone) setupRows(tui) else homeRows(tui)
         Page.SEARCH -> searchRows(tui)
         Page.LIBRARY -> libraryRows(tui)
         Page.QUEUE -> queueRows(tui)
@@ -183,6 +189,75 @@ object Pages {
             else add(Row.Note("Nothing here yet. Sign in under Settings (${tui.key(KeyAction.PAGE_SETTINGS)}), or search with ${tui.key(KeyAction.SEARCH)}.", Row.Tone.QUIET))
         }
         ui.errorMessage?.let { add(Row.Note(it, Row.Tone.WARN)) }
+    }
+
+    /**
+     * The first-time setup, as rows: the step, what it chooses -- left and right change it -- and Next, Back and Skip,
+     * on Enter. The steps and their words are the core's, as on every Noctorium.
+     */
+    private fun setupRows(tui: Tui): List<Row> = buildList {
+        val state = tui.state
+        val step = tui.setupStep
+        val preferences = state.settings.value.preferences
+        add(Row.Header(step.title, app.noctorium.settings.SetupStep.progress(step)))
+        // A sentence to a line: a row is one line, and the whole of it would run off the edge.
+        step.about.split(Regex("(?<=[.?!]) ")).forEach { add(Row.Note(it)) }
+        add(Row.Gap)
+        when (step) {
+            app.noctorium.settings.SetupStep.LOOK -> add(
+                Row.Action(
+                    "Theme",
+                    value = preferences.theme.displayName,
+                    detail = "← → to choose; many more in Settings",
+                    step = { by -> state.setTheme(Settings.cycle(app.noctorium.settings.SetupStep.themes, preferences.theme, by)) },
+                ),
+            )
+            app.noctorium.settings.SetupStep.SEARCH -> {
+                val mode = state.ui.value.searchMode
+                add(
+                    Row.Action(
+                        "Search goes to",
+                        value = if (mode == SearchMode.HYBRID) "Every service at once" else mode.displayName,
+                        detail = "← → to choose",
+                        step = { by -> state.setSearchMode(Settings.cycle(app.noctorium.settings.SetupStep.searchModes, mode, by)) },
+                    ),
+                )
+            }
+            app.noctorium.settings.SetupStep.LISTENING -> add(
+                Row.Action(
+                    "Autoplay",
+                    value = if (preferences.autoplay) "On" else "Off",
+                    detail = "Songs like the last one, when the queue runs out",
+                    step = { state.setAutoplay(!preferences.autoplay) },
+                ),
+            )
+            app.noctorium.settings.SetupStep.ACCOUNTS -> add(
+                Row.Action(
+                    "Sign in now",
+                    hint = "YouTube Music, SoundCloud, Spotify and more, in Settings",
+                    run = {
+                        state.finishSetup()
+                        tui.page = Page.SETTINGS
+                    },
+                ),
+            )
+            else -> Unit
+        }
+        add(Row.Gap)
+        val next = step.next
+        add(
+            Row.Action(
+                when (step) {
+                    app.noctorium.settings.SetupStep.WELCOME -> "Get started"
+                    app.noctorium.settings.SetupStep.DONE -> "Start listening"
+                    else -> "Next"
+                },
+                tone = Row.Tone.ACCENT,
+                run = { if (next == null) state.finishSetup() else tui.setupStep = next },
+            ),
+        )
+        step.previous?.let { back -> add(Row.Action("Back", run = { tui.setupStep = back })) }
+        if (step != app.noctorium.settings.SetupStep.DONE) add(Row.Action("Skip setup", run = { state.finishSetup() }))
     }
 
     private fun searchRows(tui: Tui): List<Row> = buildList {

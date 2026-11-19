@@ -645,6 +645,8 @@ data class WSettings(
     /** How Home is laid out, by HomeLayout's name, and the choices: one so far. */
     val homeLayout: String = app.noctorium.settings.HomeLayout.CLASSIC.name,
     val homeLayouts: List<WChoice> = emptyList(),
+    /** Whether the first-time setup is finished or skipped; the page shows it until then. */
+    val setupDone: Boolean = true,
     /**
      * The services' badges, by ServiceBadgeStyle's name -- MARKS, each service's own, or LETTERS, as they were -- and
      * the choices. The page draws them; the terminal has only letters, and keeps them.
@@ -950,6 +952,7 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine, pri
                 homePlays = HomePlay.entries.map { WChoice(it.name, it.displayName, it.description) },
                 homeLayout = p.homeLayout.name,
                 homeLayouts = app.noctorium.settings.HomeLayout.entries.map { WChoice(it.name, it.displayName, it.description) },
+                setupDone = p.setupDone,
                 serviceBadgeStyle = p.serviceBadgeStyle.name,
                 serviceBadgeStyles = ServiceBadgeStyle.entries.map { WChoice(it.name, it.displayName, it.description) },
                 bandcamp = WBandcamp(

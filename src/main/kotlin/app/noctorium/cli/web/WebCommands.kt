@@ -256,6 +256,7 @@ class WebCommands(
             "statusBar" -> state.setStatusBar(command.bool("on") ?: return "On or off?")
             "iconSet" -> state.setIconSet(choice<IconSet>(command.string("name")) ?: return "No such icons")
             "homePlay" -> state.setHomePlay(choice<HomePlay>(command.string("name")) ?: return "No such choice")
+            "finishSetup" -> state.finishSetup()
             "homeLayout" -> state.setHomeLayout(choice<app.noctorium.settings.HomeLayout>(command.string("name")) ?: return "No such layout")
             "serviceBadgeStyle" -> state.setServiceBadgeStyle(choice<ServiceBadgeStyle>(command.string("name")) ?: return "No such badges")
             "timeDisplay" -> state.setTimeDisplay(TimeDisplay.valueOf(command.string("name") ?: return "No choice"))
