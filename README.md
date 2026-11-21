@@ -56,7 +56,7 @@ noctorium web                   the web player, for any browser on your network
 - **The web player.** `noctorium web`, or `w` inside the player, serves Noctorium to the browsers on your
   network. The music plays out of whichever device opened it — a phone in your pocket gets its lock-screen
   controls — or out of this computer's speakers, with the page as a remote. The same page, with nothing
-  installed and no accounts, is at [noctorium-music.vercel.app](https://noctorium-music.vercel.app).
+  installed and no accounts, is at [music.noctorium.xyz](https://music.noctorium.xyz).
 
 ## Getting it
 
