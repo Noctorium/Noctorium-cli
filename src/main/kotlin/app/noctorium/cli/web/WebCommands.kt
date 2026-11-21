@@ -377,6 +377,8 @@ class WebCommands(
             "librefmFinish" -> state.finishLibreFmLogin()
             "listenbrainz" -> state.connectListenBrainz(command.string("token") ?: return "No token")
             "noctoriumLogIn" -> state.logInToNoctorium(command.string("email") ?: return "No email", command.string("password") ?: return "No password")
+            "noctoriumBrowserSignIn" -> state.startDeviceSignIn()
+            "noctoriumBrowserSignInCancel" -> state.cancelDeviceSignIn()
             "noctoriumSignUp" -> state.signUpToNoctorium(command.string("email") ?: return "No email", command.string("password") ?: return "No password", command.string("name").orEmpty())
             "diagnostics" -> state.runDiagnostics()
             else -> return "Not a command: $type"

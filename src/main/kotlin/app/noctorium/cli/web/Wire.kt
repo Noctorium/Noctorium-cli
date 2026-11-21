@@ -692,7 +692,7 @@ data class WConnect(
 data class WSignIn(val state: String, val code: String? = null, val message: String? = null)
 
 @Serializable
-data class WNoctorium(val signedIn: Boolean, val name: String? = null, val email: String? = null, val streams: Long = 0, val hours: Double = 0.0, val message: String? = null)
+data class WNoctorium(val signedIn: Boolean, val name: String? = null, val email: String? = null, val streams: Long = 0, val hours: Double = 0.0, val message: String? = null, val deviceCode: String? = null, val deviceUrl: String? = null)
 
 @Serializable
 data class WNotice(val text: String, val tone: String = "normal", val url: String? = null)
@@ -1027,7 +1027,7 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine, pri
     fun account(): JsonElement {
         val a = state.account.value
         return wireJson.encodeToJsonElement(
-            WNoctorium(a.signedIn, a.user?.displayName, a.user?.email, a.stats.streams.toLong(), a.stats.hours.toDouble(), a.message),
+            WNoctorium(a.signedIn, a.user?.displayName, a.user?.email, a.stats.streams.toLong(), a.stats.hours.toDouble(), a.message, a.deviceSignIn?.code, a.deviceSignIn?.url),
         )
     }
 

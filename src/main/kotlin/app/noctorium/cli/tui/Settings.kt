@@ -99,6 +99,19 @@ object Settings {
                 id = "account",
             ),
         )
+        if (!account.signedIn) {
+            val waiting = account.deviceSignIn
+            add(
+                Row.Action(
+                    "Sign in with Discord, Telegram or GitHub",
+                    value = waiting?.let { "Code ${it.code}, at ${it.url.substringBefore('?')} -- waiting (Enter cancels)" }
+                        ?: "In a browser, here or on your phone",
+                    tone = if (waiting != null) Row.Tone.GOOD else Row.Tone.QUIET,
+                    run = { if (waiting != null) state.cancelDeviceSignIn() else state.startDeviceSignIn() },
+                    id = "account-browser",
+                ),
+            )
+        }
         // The switch at the top of Devices, here too, where Settings is looked in for it: the desktop has it by the account.
         add(connectSwitch(tui, detail = true))
         val scrobbling = settings.scrobbling
