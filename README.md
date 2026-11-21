@@ -63,18 +63,18 @@ noctorium web                   the web player, for any browser on your network
 One line does it, without admin rights. In PowerShell on Windows, and in a terminal on macOS or Linux:
 
 ```powershell
-& ([scriptblock]::Create((irm https://noctorium.vercel.app/install))) --product cli
+& ([scriptblock]::Create((irm https://noctorium.xyz/install))) --product cli
 ```
 
 ```bash
-curl -fsSL https://noctorium.vercel.app/install | sh -s -- --product cli
+curl -fsSL https://noctorium.xyz/install | sh -s -- --product cli
 ```
 
 That fetches the terminal installer from the latest release, checks it against the release's checksums and
-runs it; `irm https://noctorium.vercel.app/install | iex` on its own asks which of Noctorium and the CLI you
+runs it; `irm https://noctorium.xyz/install | iex` on its own asks which of Noctorium and the CLI you
 want. With the installer already there, it is `noctorium-installer-cli --product cli`. If the website is
 ever down, the scripts are also at `https://raw.githubusercontent.com/Noctorium/Noctorium-Installer/main/scripts/install.ps1` and `install.sh`
-beside it — the same lines with that address in place of `https://noctorium.vercel.app/install`.
+beside it — the same lines with that address in place of `https://noctorium.xyz/install`.
 
 Or take the archive from the [latest release](https://github.com/Noctorium/Noctorium-Installer/releases/latest)
 — `noctorium-cli-<version>-windows-x64.zip` or `noctorium-cli-<version>-linux-x64.tar.gz` — and put its
