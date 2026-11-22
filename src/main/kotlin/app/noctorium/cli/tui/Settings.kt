@@ -103,7 +103,7 @@ object Settings {
             val waiting = account.deviceSignIn
             add(
                 Row.Action(
-                    "Sign in with Discord, Telegram or GitHub",
+                    "Sign in with Discord or Telegram",
                     value = waiting?.let { "Code ${it.code}, at ${it.url.substringBefore('?')} -- waiting (Enter cancels)" }
                         ?: "In a browser, here or on your phone",
                     tone = if (waiting != null) Row.Tone.GOOD else Row.Tone.QUIET,

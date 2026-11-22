@@ -25,8 +25,8 @@ object SettingsIndex {
     val ENTRIES: List<SettingEntry> = listOf(
         entry("account", "Noctorium account", Settings.YOU, "Counts your listening, and lets Connect find your other devices.", "sign in", "log in", "login", "profile", "stats"),
         entry(
-            "account-browser", "Sign in with Discord, Telegram or GitHub", Settings.YOU, "Sign in to the Noctorium account in a browser, here or on your phone, with a code.",
-            "discord", "telegram", "github", "sign in", "log in", "browser", "code",
+            "account-browser", "Sign in with Discord or Telegram", Settings.YOU, "Sign in to the Noctorium account in a browser, here or on your phone, with a code.",
+            "discord", "telegram", "sign in", "log in", "browser", "code",
         ),
         entry(
             "connect", "Noctorium Connect", Settings.YOU, "Whether this computer and your other devices find each other, to move the music between them.",
