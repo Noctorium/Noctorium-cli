@@ -106,7 +106,10 @@ class DevicesPageTest {
     fun `Settings has the same switch by the account, saying what it means while it is chosen`() {
         val rows = Settings.rows(tui)
         val account = rows.indexOfFirst { it is Row.Action && it.id == "account" }
-        val connect = assertIs<Row.Action>(rows[account + 1])
+        // Signed out, the browser sign-in row sits between them, with the account it signs in to.
+        val next = rows[account + 1]
+        val skip = if (next is Row.Action && next.id == "account-browser") 2 else 1
+        val connect = assertIs<Row.Action>(rows[account + skip])
         assertEquals("connect", connect.id)
         assertEquals("Noctorium Connect", connect.label)
         assertEquals("On", connect.value)
