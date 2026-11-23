@@ -68,6 +68,33 @@ object Settings {
     const val ABOUT = "About"
     val SECTIONS = listOf(YOU, LOOK, LISTENING, SERVICES, DEVICE, ABOUT)
 
+    private fun askVerificationCodes(tui: Tui, asked: app.noctorium.account.VerificationChallenge) {
+        val state = tui.state
+        fun prompt(way: String, then: (String) -> Unit) {
+            if (way == "telegram") state.sendNoctoriumTelegramCode()
+            val hint = if (way == "totp") "The code your authenticator app shows, or a backup code." else "The code Telegram just sent you, or a backup code."
+            tui.overlays.addLast(Overlay.Prompt("Two-step verification", hint, secret = false) { code -> if (code.isNotBlank()) then(code.trim()) })
+        }
+        fun send(codes: Map<String, String>) {
+            val backup = codes.values.firstOrNull { it.any(Char::isLetter) }
+            state.verifyNoctorium(
+                totp = codes["totp"]?.takeIf { it != backup },
+                telegram = codes["telegram"]?.takeIf { it != backup },
+                backup = backup,
+            )
+        }
+        when {
+            asked.strict && asked.stillNeeded.size > 1 ->
+                prompt(asked.stillNeeded[0]) { first -> prompt(asked.stillNeeded[1]) { second -> send(mapOf(asked.stillNeeded[0] to first, asked.stillNeeded[1] to second)) } }
+            asked.strict || asked.methods.size == 1 -> asked.stillNeeded.firstOrNull()?.let { way -> prompt(way) { send(mapOf(way to it)) } }
+            else -> tui.overlays.addLast(
+                Overlay.Picker("Verify with", asked.methods.map { way ->
+                    (if (way == "totp") "Authenticator app" else "Telegram") to { prompt(way) { send(mapOf(way to it)) } }
+                }),
+            )
+        }
+    }
+
     /** The booster's stops for the arrows in Settings: finer where it is quieter, a hundred at a time above 300%. */
     val BOOST_STEPS = listOf(100, 125, 150, 175, 200, 250, 300, 400, 500, 600, 700, 800, 900, 1000)
 
@@ -99,6 +126,19 @@ object Settings {
                 id = "account",
             ),
         )
+        // Two-step verification, after the password: the codes, one prompt each. Anything with a letter in it is taken as
+        // a backup code, which stands in for either way.
+        account.verification?.let { asked ->
+            add(
+                Row.Action(
+                    "Two-step verification",
+                    value = if (asked.strict) "Strict: both codes needed (Enter)" else "Enter a code to finish signing in",
+                    tone = Row.Tone.GOOD,
+                    run = { askVerificationCodes(tui, asked) },
+                    id = "account-verify",
+                ),
+            )
+        }
         if (!account.signedIn) {
             val waiting = account.deviceSignIn
             add(

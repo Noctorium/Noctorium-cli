@@ -25,6 +25,10 @@ object SettingsIndex {
     val ENTRIES: List<SettingEntry> = listOf(
         entry("account", "Noctorium account", Settings.YOU, "Counts your listening, and lets Connect find your other devices.", "sign in", "log in", "login", "profile", "stats"),
         entry(
+            "account-verify", "Two-step verification", Settings.YOU, "The code your authenticator app shows, or Telegram sends, to finish signing in.",
+            "2fa", "two-step", "two factor", "authenticator", "code", "verify", "otp",
+        ),
+        entry(
             "account-browser", "Sign in with Discord or Telegram", Settings.YOU, "Sign in to the Noctorium account in a browser, here or on your phone, with a code.",
             "discord", "telegram", "sign in", "log in", "browser", "code",
         ),
@@ -122,6 +126,7 @@ object SettingsIndex {
         "playerButtons" to ("playerBar" to "The buttons are there to choose with Toolbar 2"),
         "spotifyPlayback" to ("spotifyPremium" to "There once Spotify Premium is signed in"),
         "spotifyDevice" to ("spotifyPremium" to "There once Spotify Premium is signed in"),
+        "account-verify" to ("account" to "There after the password, while two-step verification waits for a code"),
     )
 
     /** What [query] finds, as rows to choose from: each with its section, and the word it was found by. */

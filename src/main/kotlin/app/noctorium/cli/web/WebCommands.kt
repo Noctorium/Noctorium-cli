@@ -379,6 +379,9 @@ class WebCommands(
             "noctoriumLogIn" -> state.logInToNoctorium(command.string("email") ?: return "No email", command.string("password") ?: return "No password")
             "noctoriumBrowserSignIn" -> state.startDeviceSignIn()
             "noctoriumBrowserSignInCancel" -> state.cancelDeviceSignIn()
+            "noctoriumVerify" -> state.verifyNoctorium(command.string("totp"), command.string("telegram"), command.string("backup"))
+            "noctoriumTelegramCode" -> state.sendNoctoriumTelegramCode()
+            "noctoriumVerifyCancel" -> state.cancelNoctoriumVerification()
             "noctoriumSignUp" -> state.signUpToNoctorium(command.string("email") ?: return "No email", command.string("password") ?: return "No password", command.string("name").orEmpty())
             "diagnostics" -> state.runDiagnostics()
             else -> return "Not a command: $type"
