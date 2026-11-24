@@ -25,6 +25,10 @@ object SettingsIndex {
     val ENTRIES: List<SettingEntry> = listOf(
         entry("account", "Noctorium account", Settings.YOU, "Counts your listening, and lets Connect find your other devices.", "sign in", "log in", "login", "profile", "stats"),
         entry(
+            "account-profile", "Profile", Settings.YOU, "Change your name, email or password, or delete the Noctorium account.",
+            "name", "email", "password", "change password", "delete account", "profile", "rename",
+        ),
+        entry(
             "account-verify", "Two-step verification", Settings.YOU, "The code your authenticator app shows, or Telegram sends, to finish signing in.",
             "2fa", "two-step", "two factor", "authenticator", "code", "verify", "otp",
         ),
@@ -49,6 +53,7 @@ object SettingsIndex {
             // The Glow themes, by their family's name and their own, and by what they are: black.
             "glow", "afterglow", "cinder", "velvet", "smoke", "black",
         ),
+        entry("settings-button", "Settings button", Settings.LOOK, "On Home beside your picture, or among the pages, in the desktop and phone apps.", "gear", "settings gear", "settings placement", "cog"),
         entry("accent", "Accent", Settings.LOOK, "The colour that picks things out, or one from the cover.", "colour", "color", "highlight", "tint"),
         entry("glyphs", "Symbols", Settings.LOOK, "The buttons' and pages' symbols: the standard ones, plain ASCII, or a Nerd Font's icons.", "icons", "icon set", "glyphs", "nerd font", "ascii", "emoji"),
         entry("playerBar", "Player bar", Settings.LOOK, "How the bar along the foot is laid out: full, compact, a taskbar, or a toolbar as it was or Toolbar 2.", "controls", "toolbar", "toolbar 2", "taskbar", "compact", "footer"),
@@ -126,6 +131,7 @@ object SettingsIndex {
         "playerButtons" to ("playerBar" to "The buttons are there to choose with Toolbar 2"),
         "spotifyPlayback" to ("spotifyPremium" to "There once Spotify Premium is signed in"),
         "spotifyDevice" to ("spotifyPremium" to "There once Spotify Premium is signed in"),
+        "account-profile" to ("account" to "There once you are signed in"),
         "account-verify" to ("account" to "There after the password, while two-step verification waits for a code"),
     )
 

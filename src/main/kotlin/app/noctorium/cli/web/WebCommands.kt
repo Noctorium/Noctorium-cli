@@ -380,7 +380,21 @@ class WebCommands(
             "noctoriumBrowserSignIn" -> state.startDeviceSignIn()
             "noctoriumBrowserSignInCancel" -> state.cancelDeviceSignIn()
             "noctoriumVerify" -> state.verifyNoctorium(command.string("totp"), command.string("telegram"), command.string("backup"))
-            "noctoriumTelegramCode" -> state.sendNoctoriumTelegramCode()
+            // A sign-in's code while one waits for it; otherwise the one that proves a change on the account page.
+            "noctoriumTelegramCode" ->
+                if (state.account.value.verification != null) state.sendNoctoriumTelegramCode() else state.sendNoctoriumProfileTelegramCode()
+            "noctoriumProfile" -> state.changeNoctoriumProfile(
+                command.string("action") ?: return "No action",
+                listOf("name", "email", "password", "current", "code", "confirm").mapNotNull { key -> command.string(key)?.let { key to it } }.toMap(),
+            )
+            "noctoriumAvatar" -> state.uploadNoctoriumAvatar(
+                runCatching { java.util.Base64.getDecoder().decode(command.string("jpegBase64").orEmpty()) }.getOrNull()?.takeIf { it.isNotEmpty() }
+                    ?: return "Not a picture",
+            )
+            "settingsButton" -> state.setSettingsButton(
+                app.noctorium.settings.SettingsButton.entries.firstOrNull { it.name.equals(command.string("placement"), ignoreCase = true) }
+                    ?: return "Not a placement",
+            )
             "noctoriumVerifyCancel" -> state.cancelNoctoriumVerification()
             "noctoriumSignUp" -> state.signUpToNoctorium(command.string("email") ?: return "No email", command.string("password") ?: return "No password", command.string("name").orEmpty())
             "diagnostics" -> state.runDiagnostics()

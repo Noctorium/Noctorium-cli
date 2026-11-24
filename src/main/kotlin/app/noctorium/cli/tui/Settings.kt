@@ -95,6 +95,42 @@ object Settings {
         }
     }
 
+    /**
+     * The account page's changes as prompts: the new value, then what proves it is the owner -- the password when the
+     * account has one, and the two-step code when that is on (Telegram's is sent first, when that is the only way).
+     */
+    private fun askProfileChange(tui: Tui) {
+        val state = tui.state
+        val user = state.account.value.user ?: return
+        state.clearNoctoriumProfileError()
+        fun ask(hint: String, secret: Boolean = false, then: (String) -> Unit) =
+            tui.overlays.addLast(Overlay.Prompt("Noctorium account", hint, secret = secret) { if (it.isNotBlank()) then(it) })
+        fun proved(then: (Map<String, String>) -> Unit) {
+            fun code(proof: Map<String, String>) {
+                if (!user.twoStep.totp && !user.twoStep.telegram) return then(proof)
+                if (!user.twoStep.totp) state.sendNoctoriumProfileTelegramCode()
+                ask(if (user.twoStep.totp) "The code your authenticator app shows." else "The code Telegram just sent you.") { then(proof + ("code" to it.trim())) }
+            }
+            if (user.hasPassword) ask("Your password.", secret = true) { code(mapOf("password" to it)) } else code(emptyMap())
+        }
+        tui.overlays.addLast(
+            Overlay.Picker("Profile", buildList {
+                add("Change name" to { ask("Your new name.") { state.changeNoctoriumProfile("name", mapOf("name" to it.trim())) } })
+                add("Change email" to { ask("Your new email address.") { email -> proved { state.changeNoctoriumProfile("email", it + ("email" to email.trim())) } } })
+                if (user.hasPassword) add("Change password" to {
+                    ask("Your new password, at least 10 characters.", secret = true) { next ->
+                        proved { proof -> state.changeNoctoriumProfile("password", proof - "password" + ("current" to proof["password"].orEmpty()) + ("password" to next)) }
+                    }
+                })
+                add("Delete the account" to {
+                    ask("Deletes the account and everything it counted, for good. Type \"delete my account\".") { typed ->
+                        proved { state.changeNoctoriumProfile("delete", it + ("confirm" to typed)) }
+                    }
+                })
+            }),
+        )
+    }
+
     /** The booster's stops for the arrows in Settings: finer where it is quieter, a hundred at a time above 300%. */
     val BOOST_STEPS = listOf(100, 125, 150, 175, 200, 250, 300, 400, 500, 600, 700, 800, 900, 1000)
 
@@ -126,6 +162,21 @@ object Settings {
                 id = "account",
             ),
         )
+        if (account.signedIn) {
+            add(
+                Row.Action(
+                    "Profile",
+                    value = when {
+                        account.profileBusy -> "Sending…"
+                        account.profileError != null -> account.profileError
+                        else -> "Change your name, email or password, or delete the account"
+                    },
+                    tone = if (account.profileError != null) Row.Tone.WARN else Row.Tone.QUIET,
+                    run = { askProfileChange(tui) },
+                    id = "account-profile",
+                ),
+            )
+        }
         // Two-step verification, after the password: the codes, one prompt each. Anything with a letter in it is taken as
         // a backup code, which stands in for either way.
         account.verification?.let { asked ->
@@ -192,6 +243,14 @@ object Settings {
             Row.Action("Theme", value = themeName(preferences.theme), step = { by -> tui.cycleTheme(by) }, run = {
                 tui.overlays.addLast(Overlay.Picker("Theme", themes.map { theme -> themeName(theme) to { state.setTheme(theme) } }))
             }, id = "theme"),
+        )
+        add(
+            Row.Action(
+                "Settings button", value = preferences.settingsButton.displayName,
+                detail = "Where the desktop and phone apps put Settings: on Home beside your picture, or among the pages.",
+                step = { by -> state.setSettingsButton(cycle(app.noctorium.settings.SettingsButton.entries, preferences.settingsButton, by)) },
+                id = "settings-button",
+            ),
         )
         add(Row.Action("Accent", value = preferences.accent.displayName, step = { by -> state.setAccent(cycle(AccentPreset.entries, preferences.accent, by)) }, id = "accent"))
         val glyphs = tui.preferences.glyphs

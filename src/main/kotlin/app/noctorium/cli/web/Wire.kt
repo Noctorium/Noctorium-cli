@@ -598,6 +598,8 @@ data class WSettings(
     val youtube: WAccount,
     val soundcloud: WAccount,
     val youtubeChannel: String,
+    /** Where Settings is: "home", a gear beside the picture on Home, or "toolbar", among the pages. */
+    val settingsButton: String = "home",
     val soundCloudUsername: String,
     val spotifyConnected: Boolean,
     val spotifyConnecting: Boolean,
@@ -692,7 +694,16 @@ data class WConnect(
 data class WSignIn(val state: String, val code: String? = null, val message: String? = null)
 
 @Serializable
-data class WNoctorium(val signedIn: Boolean, val name: String? = null, val email: String? = null, val streams: Long = 0, val hours: Double = 0.0, val message: String? = null, val deviceCode: String? = null, val deviceUrl: String? = null, val verifyWith: List<String>? = null, val verifyStrict: Boolean = false, val verified: List<String> = emptyList())
+data class WNoctorium(val signedIn: Boolean, val name: String? = null, val email: String? = null, val streams: Long = 0, val hours: Double = 0.0, val message: String? = null, val deviceCode: String? = null, val deviceUrl: String? = null, val verifyWith: List<String>? = null, val verifyStrict: Boolean = false, val verified: List<String> = emptyList(),
+    /** For the account page: the picture, which proofs a change asks for, which pictures can be borrowed, and a change on its way. */
+    val avatar: String? = null, val hasPassword: Boolean = true, val twoStep: WTwoStep = WTwoStep(), val linked: WLinked = WLinked(),
+    val profileBusy: Boolean = false, val profileError: String? = null)
+
+@Serializable
+data class WTwoStep(val totp: Boolean = false, val telegram: Boolean = false)
+
+@Serializable
+data class WLinked(val discord: Boolean = false, val telegram: Boolean = false)
 
 @Serializable
 data class WNotice(val text: String, val tone: String = "normal", val url: String? = null)
@@ -947,6 +958,7 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine, pri
                 allQueueColumns = QueueColumn.entries.map { WChoice(it.name, it.displayName, it.heading) },
                 statusBar = p.statusBar,
                 iconSet = p.iconSet.name,
+                settingsButton = p.settingsButton.name.lowercase(),
                 iconSets = IconSet.entries.map { WChoice(it.name, it.displayName, it.description) },
                 homePlay = p.homePlay.name,
                 homePlays = HomePlay.entries.map { WChoice(it.name, it.displayName, it.description) },
@@ -1027,7 +1039,11 @@ class Wire(private val state: AppState, private val engine: SwitchingEngine, pri
     fun account(): JsonElement {
         val a = state.account.value
         return wireJson.encodeToJsonElement(
-            WNoctorium(a.signedIn, a.user?.displayName, a.user?.email, a.stats.streams.toLong(), a.stats.hours.toDouble(), a.message, a.deviceSignIn?.code, a.deviceSignIn?.url, a.verification?.methods, a.verification?.strict == true, a.verification?.done.orEmpty()),
+            WNoctorium(a.signedIn, a.user?.displayName, a.user?.email, a.stats.streams.toLong(), a.stats.hours.toDouble(), a.message, a.deviceSignIn?.code, a.deviceSignIn?.url, a.verification?.methods, a.verification?.strict == true, a.verification?.done.orEmpty(),
+                a.user?.avatarUrl, a.user?.hasPassword ?: true,
+                WTwoStep(a.user?.twoStep?.totp == true, a.user?.twoStep?.telegram == true),
+                WLinked(a.user?.linked?.discord == true, a.user?.linked?.telegram == true),
+                a.profileBusy, a.profileError),
         )
     }
 
