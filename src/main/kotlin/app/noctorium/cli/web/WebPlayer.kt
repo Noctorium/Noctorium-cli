@@ -330,6 +330,15 @@ class WebPlayer(
                     ?: return@get call.respondText("Nothing to encode", status = HttpStatusCode.BadRequest)
                 call.respondText(qrSvg(text), ContentType.parse("image/svg+xml"))
             }
+            // The account's full statistics, for the page's Stats: asked of the stats service with this program's sign-in.
+            get("/api/stats") {
+                if (!authorised(call)) return@get call.respondText("Unauthorised", status = HttpStatusCode.Unauthorized)
+                val range = app.noctorium.account.StatsRange.entries.firstOrNull { it.code == call.request.queryParameters["range"] }
+                    ?: app.noctorium.account.StatsRange.MONTH
+                val stats = state.accountStats(range)
+                    ?: return@get call.respondText("""{"error":"Not signed in, or the stats service could not be reached."}""", ContentType.Application.Json, HttpStatusCode.BadGateway)
+                call.respondText(kotlinx.serialization.json.Json { encodeDefaults = true }.encodeToString(app.noctorium.account.AccountStats.serializer(), stats), ContentType.Application.Json)
+            }
             get("/api/address") {
                 if (!authorised(call)) return@get call.respondText("Unauthorised", status = HttpStatusCode.Unauthorized)
                 call.respondText(buildJsonObject { put("address", address); put("local", localAddress) }.toString(), ContentType.Application.Json)
